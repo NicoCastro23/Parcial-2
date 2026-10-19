@@ -1,0 +1,58 @@
+{{define "content"}}
+<p class="lead">Crea un par de llaves <code>ed25519</code> para <strong>root</strong>, autoriza la llave pública en la VM, deshabilita el acceso por contraseña y deja disponible la llave privada para descargarla.</p>
+
+{{if not .Root}}
+<section class="card">
+  <h2>Qué hará sobre {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <ol class="steps-preview">
+    <li>Comprobar la comunicación y que se ejecuta como root.</li>
+    <li>Instalar el servidor SSH si no está y activarlo.</li>
+    <li>Generar el par de llaves en este equipo (la privada nunca viaja a la VM).</li>
+    <li>Agregar la llave pública a <code>/root/.ssh/authorized_keys</code>.</li>
+    <li><strong>Probar la llave antes de cambiar nada.</strong> Si falla, se detiene sin tocar SSH.</li>
+    <li>Deshabilitar la contraseña (<code>PasswordAuthentication no</code>) y exigir llave a root.</li>
+    <li>Verificar la configuración efectiva y volver a probar la llave; si algo falla, se revierte solo.</li>
+  </ol>
+  <form method="post" action="/prep/rootkey">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required>
+      Entiendo que, al terminar, <strong>ningún usuario de esta VM podrá entrar por SSH con contraseña</strong>.</label>
+    <button type="submit" class="primary">Configurar llave de root</button>
+  </form>
+</section>
+{{end}}
+
+{{with .Root}}
+<section class="card">
+  <h2>{{if .OK}}Resultado: configuración completa{{else}}Resultado: la operación no se completó{{end}}</h2>
+  <ol class="steps">
+    {{range .Steps}}
+    <li class="{{if .OK}}ok{{else}}fail{{end}}">
+      <div class="stepline"><span class="mark" aria-hidden="true">{{if .OK}}✓{{else}}✗{{end}}</span>
+        <span><strong>{{.Name}}</strong><br>{{.Detail}}</span></div>
+      {{if .Technical}}<details><summary>Detalle técnico</summary><pre class="out">{{.Technical}}</pre></details>{{end}}
+    </li>
+    {{end}}
+  </ol>
+  {{if .RolledBack}}<div class="msg err">Se revirtió el endurecimiento de SSH. La VM conserva su configuración anterior.</div>{{end}}
+</section>
+{{end}}
+
+{{if and .Root .Root.OK}}
+<section class="card success">
+  <h2>Descargue la llave privada</h2>
+  <p>Huella de la llave: <code>{{.Root.Fingerprint}}</code></p>
+  <p><a class="button primary" href="{{.DownloadURL}}" download>Descargar {{.Root.DownloadName}}</a>
+     <small>El enlace vence en 15 minutos.</small></p>
+  <h3>Cómo usar correctamente la llave privada</h3>
+  <ul>
+    <li>Es la <strong>credencial de root</strong>: quien la tenga entra a la VM sin contraseña. No la comparta, no la envíe por correo ni la suba a repositorios.</li>
+    <li>Guárdela en <code>~/.ssh</code> y restrinja los permisos: <code>chmod 600 ~/.ssh/{{.Root.DownloadName}}</code>. SSH se niega a usar llaves con permisos abiertos.</li>
+    <li>Conéctese con: <code>ssh -i ~/.ssh/{{.Root.DownloadName}} root@{{.Cur.Host}}</code></li>
+    <li>Esta aplicación conserva una copia en su carpeta de datos para administrar la VM por SSH. Protéjala igual que cualquier llave.</li>
+    <li>Si la pierde o sospecha que se filtró, ejecutar esta operación otra vez genera una llave nueva, pero <strong>la anterior sigue autorizada en la VM</strong>: bórrela también de <code>/root/.ssh/authorized_keys</code>. En el equipo local queda solo como respaldo (<code>.old-…</code>).</li>
+  </ul>
+</section>
+{{end}}
+{{end}}

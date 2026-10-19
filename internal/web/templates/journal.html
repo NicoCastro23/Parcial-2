@@ -1,0 +1,19 @@
+{{define "content"}}
+<p class="lead">Cada comando que la aplicación ejecuta en una VM queda registrado: qué se ejecutó, dónde, qué respondió y cuánto tardó. Sirve como evidencia en las pruebas y para diagnosticar errores.</p>
+{{if not .Entries}}<p class="note">Todavía no hay operaciones registradas.</p>{{end}}
+{{range .Entries}}
+<details class="entry {{if .Error}}fail{{else}}ok{{end}}">
+  <summary>
+    <span class="mark" aria-hidden="true">{{if .Error}}✗{{else}}✓{{end}}</span>
+    <time>{{.Time.Format "2006-01-02 15:04:05"}}</time>
+    <code>{{.Target}}</code> · {{.Transport}} · {{.Op}} · {{.DurationMs}} ms
+  </summary>
+  <pre class="out">$ {{.Command}}
+{{.Script}}
+--- salida ---
+{{.Stdout}}{{if .Stderr}}[stderr] {{.Stderr}}{{end}}{{if .Error}}
+[error] {{.Error}}{{end}}
+[código de salida {{.ExitCode}}]</pre>
+</details>
+{{end}}
+{{end}}

@@ -1,0 +1,43 @@
+{{define "content"}}
+<p class="lead">Antes de instalar SSH la aplicación habla con la VM por <strong>Guest Additions</strong>; después, <strong>solo por SSH con llaves</strong>. Aquí se prueba el canal de cada VM.</p>
+
+<table>
+  <thead><tr><th>VM</th><th>Dirección</th><th>Canal</th><th>Usuario SSH</th><th>Llave privada</th><th>VM en VirtualBox</th></tr></thead>
+  <tbody>
+  {{range .Targets}}
+  <tr{{if eq .ID $.Cur.ID}} class="cur"{{end}}>
+    <td>{{.Label}}</td>
+    <td><code>{{.Host}}:{{.Port}}</code></td>
+    <td><span class="chip {{.Transport}}">{{.Transport}}</span></td>
+    <td><code>{{.User}}</code></td>
+    <td><code>{{.KeyPath}}</code></td>
+    <td>{{.VMName}} <small>({{.GuestUser}})</small></td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<section class="card">
+  <h2>{{.Cur.Label}}</h2>
+  <div class="row">
+    <form method="post" action="/connection/test">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="t" value="{{.Cur.ID}}">
+      <button type="submit" class="primary">Probar conexión</button>
+    </form>
+    <form method="post" action="/connection/transport" class="inline">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="t" value="{{.Cur.ID}}">
+      <label for="transport">Canal</label>
+      <select id="transport" name="transport">
+        <option value="guest"{{if eq .Cur.Transport "guest"}} selected{{end}}>Guest Additions (antes de SSH)</option>
+        <option value="ssh"{{if eq .Cur.Transport "ssh"}} selected{{end}}>SSH con llave</option>
+      </select>
+      <button type="submit">Cambiar canal</button>
+    </form>
+  </div>
+  {{if .TestOutput}}<pre class="out">{{.TestOutput}}</pre>{{end}}
+</section>
+
+<p class="note">Con Guest Additions, si el usuario no es root, la contraseña de <code>sudo</code> se lee de la variable de entorno <code>{{.Cur.GuestPasswordEnv}}</code> (nunca se guarda en <code>config.json</code>).</p>
+{{end}}

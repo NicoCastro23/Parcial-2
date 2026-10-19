@@ -1,0 +1,242 @@
+package web
+
+import (
+	"bytes"
+	"net/http"
+	"os"
+	"time"
+
+	"np2auto/internal/config"
+	"np2auto/internal/ops"
+	"np2auto/internal/runner"
+)
+
+// navItem y navSection arman el menú lateral.
+type navItem struct {
+	Title string
+	Path  string
+	Done  bool // el módulo ya está implementado
+}
+
+type navSection struct {
+	Title string
+	Items []navItem
+}
+
+var nav = []navSection{
+	{"General", []navItem{
+		{"Conexión con las VMs", "/connection", true},
+		{"Registro de operaciones", "/journal", true},
+	}},
+	{"Preparación del sistema", []navItem{
+		{"Instalar y eliminar aplicaciones", "/m/packages", false},
+		{"Llave SSH del usuario root", "/prep/rootkey", true},
+		{"Pantalla de entrada (/etc/issue)", "/m/issue", false},
+		{"Nombre de host y /etc/hosts", "/m/hostname", false},
+	}},
+	{"Gestión de usuarios", []navItem{
+		{"Crear usuarios", "/m/users-create", false},
+		{"Eliminar usuarios", "/m/users-delete", false},
+	}},
+	{"Servicios", []navItem{
+		{"Demonios con systemd", "/m/services", false},
+		{"Balanceador HAProxy", "/m/haproxy", false},
+	}},
+}
+
+// pendingModule describe lo que exige el enunciado de un módulo aún no hecho.
+type pendingModule struct {
+	Title, Ref, Summary string
+}
+
+var pending = map[string]pendingModule{
+	"packages":     {"Instalar y eliminar aplicaciones", "3.1.1", "Formulario para indicar la aplicación; botones Instalar y Eliminar; el resultado se informa en la aplicación."},
+	"issue":        {"Pantalla de entrada (/etc/issue)", "3.1.3", "Establecer /etc/issue con opciones para mostrar nombre de host, fecha, hora y dirección IP, más un mensaje personalizado."},
+	"hostname":     {"Nombre de host y /etc/hosts", "3.1.4", "Establecer el nombre de host del sistema y actualizar /etc/hosts para que lo incluya."},
+	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
+	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
+	"services":     {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
+	"haproxy":      {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
+}
+
+// page es el modelo común de todas las plantillas.
+type page struct {
+	Title    string
+	Active   string
+	Nav      []navSection
+	Targets  []config.Target
+	Cur      config.Target
+	CSRF     string
+	Flash    string
+	FlashErr string
+
+	// Específicos de cada página.
+	TestOutput  string
+	TestOK      *bool
+	Root        *ops.RootKeyResult
+	DownloadURL string
+	Entries     []runner.Entry
+	Pending     *pendingModule
+}
+
+func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
+	snap := s.cfg.Snapshot()
+	id := r.FormValue("t")
+	cur := snap.Targets[0]
+	for _, t := range snap.Targets {
+		if t.ID == id {
+			cur = t
+		}
+	}
+	return page{
+		Title: title, Active: active, Nav: nav,
+		Targets: snap.Targets, Cur: cur, CSRF: s.csrf,
+	}, true
+}
+
+func (s *Server) render(w http.ResponseWriter, name string, p page) {
+	var buf bytes.Buffer
+	if err := s.tmpl[name].ExecuteTemplate(&buf, "layout", p); err != nil {
+		s.logf("render %s: %v", name, err)
+		http.Error(w, "error interno al generar la página", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	buf.WriteTo(w)
+}
+
+// ---- Conexión ----
+
+func (s *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Conexión con las VMs", "/connection")
+	s.render(w, "connection", p)
+}
+
+const probeScript = `
+echo "usuario: $(id -un) (uid $(id -u))"
+echo "host: $(hostname)"
+. /etc/os-release && echo "sistema: $PRETTY_NAME"
+echo "ip: $(hostname -I 2>/dev/null)"
+if command -v sshd >/dev/null 2>&1; then echo "sshd: instalado"; else echo "sshd: NO instalado"; fi
+echo "servicio ssh: $(systemctl is-active ssh 2>/dev/null || echo desconocido)"
+`
+
+func (s *Server) handleConnectionTest(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Conexión con las VMs", "/connection")
+	rn, err := s.runnerFor(p.Cur)
+	if err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "connection", p)
+		return
+	}
+	ctx, cancel := opContext(r, 90*time.Second)
+	defer cancel()
+	res, err := rn.Run(runner.WithOp(ctx, "conexion/probar"), probeScript)
+	ok := err == nil
+	p.TestOK = &ok
+	p.TestOutput = res.Stdout
+	if err != nil {
+		p.FlashErr = runner.Explain(err)
+		p.TestOutput = "$ " + res.Command + "\n" + res.Stdout + res.Stderr
+	} else {
+		p.Flash = "La VM respondió correctamente por " + rn.Describe() + "."
+	}
+	s.render(w, "connection", p)
+}
+
+func (s *Server) handleTransport(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Conexión con las VMs", "/connection")
+	transport := r.PostFormValue("transport")
+	err := s.cfg.Update(p.Cur.ID, func(t *config.Target) { t.Transport = transport })
+	if err != nil {
+		p.FlashErr = err.Error()
+	} else {
+		p.Flash = "Canal de comunicación actualizado."
+		p.Cur, _ = s.cfg.Target(p.Cur.ID)
+		p.Targets = s.cfg.Snapshot().Targets
+	}
+	s.render(w, "connection", p)
+}
+
+// ---- Llave SSH de root (3.1.2) ----
+
+func (s *Server) handleRootKey(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Llave SSH del usuario root", "/prep/rootkey")
+	s.render(w, "rootkey", p)
+}
+
+func (s *Server) handleRootKeyRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Llave SSH del usuario root", "/prep/rootkey")
+	if r.PostFormValue("confirm") != "yes" {
+		p.FlashErr = "Marque la casilla de confirmación: esta operación deshabilita el acceso por contraseña en la VM."
+		s.render(w, "rootkey", p)
+		return
+	}
+	unlock, ok := s.locks.try(p.Cur.ID)
+	if !ok {
+		p.FlashErr = "Ya hay una operación en curso sobre esta VM. Espere a que termine."
+		s.render(w, "rootkey", p)
+		return
+	}
+	defer unlock()
+
+	rn, err := s.runnerFor(p.Cur)
+	if err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "rootkey", p)
+		return
+	}
+	ctx, cancel := opContext(r, 15*time.Minute)
+	defer cancel()
+	res := ops.ConfigureRootKey(ctx, s.operationEnv(p.Cur, rn))
+	p.Root = res
+	if res.OK {
+		tok := s.dl.Add(res.KeyPath, res.DownloadName, 15*time.Minute)
+		p.DownloadURL = "/download/" + tok
+		p.Cur, _ = s.cfg.Target(p.Cur.ID) // ya cambió a SSH con la nueva llave
+		p.Targets = s.cfg.Snapshot().Targets
+	}
+	s.render(w, "rootkey", p)
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	tok := cleanToken(r.PathValue("token"))
+	e, ok := s.dl.Get(tok)
+	if tok == "" || !ok {
+		http.Error(w, "enlace de descarga inválido o vencido: ejecute de nuevo la operación", http.StatusNotFound)
+		return
+	}
+	data, err := os.ReadFile(e.path)
+	if err != nil {
+		http.Error(w, "no se pudo leer la llave", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+e.name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(data)
+}
+
+// ---- Registro y módulos pendientes ----
+
+func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Registro de operaciones", "/journal")
+	entries, err := s.journal.Tail(50)
+	if err != nil {
+		p.FlashErr = "No se pudo leer el registro: " + err.Error()
+	}
+	p.Entries = entries
+	s.render(w, "journal", p)
+}
+
+func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
+	m, ok := pending[r.PathValue("slug")]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	p, _ := s.newPage(r, m.Title, "/m/"+r.PathValue("slug"))
+	p.Pending = &m
+	s.render(w, "pending", p)
+}

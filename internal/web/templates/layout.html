@@ -1,0 +1,39 @@
+{{define "layout"}}<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · NP2 Automatización</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">NP2 <span>Consola de automatización</span></div>
+  <form method="get" action="{{.Active}}" class="picker">
+    <label for="t">VM destino</label>
+    <select id="t" name="t" onchange="this.form.submit()">
+      {{range .Targets}}<option value="{{.ID}}"{{if eq .ID $.Cur.ID}} selected{{end}}>{{.Label}} · {{.Host}}</option>{{end}}
+    </select>
+    <span class="chip {{.Cur.Transport}}" title="Canal de comunicación actual">{{if eq .Cur.Transport "ssh"}}SSH con llave{{else}}Guest Additions{{end}}</span>
+  </form>
+</header>
+<div class="shell">
+  <nav class="side" aria-label="Módulos">
+    {{range .Nav}}
+    <h2>{{.Title}}</h2>
+    <ul>
+      {{range .Items}}
+      <li><a href="{{.Path}}?t={{$.Cur.ID}}"{{if eq .Path $.Active}} aria-current="page"{{end}}>{{.Title}}{{if not .Done}} <small class="todo">pendiente</small>{{end}}</a></li>
+      {{end}}
+    </ul>
+    {{end}}
+  </nav>
+  <main>
+    <h1>{{.Title}}</h1>
+    {{if .Flash}}<div class="msg ok" role="status">{{.Flash}}</div>{{end}}
+    {{if .FlashErr}}<div class="msg err" role="alert">{{.FlashErr}}</div>{{end}}
+    {{template "content" .}}
+  </main>
+</div>
+</body>
+</html>{{end}}
