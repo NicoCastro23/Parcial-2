@@ -16,7 +16,7 @@ interactiva.
 | 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.2.1 / 3.2.2 | Crear / eliminar usuarios | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.3 | Servicios systemd | **Hecho** (pruebas unitarias; unidad validada con `systemd-analyze`; falta probar en la VM) |
-| 3.4 | HAProxy: agregar / quitar servidor del backend | Pendiente |
+| 3.4 | HAProxy: agregar / quitar servidor del backend | **Hecho** (pruebas unitarias y de punta a punta con HAProxy real; falta probar en la VM) |
 
 ## Ejecutar
 
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (llave SSH de root, paquetes, /etc/issue, nombre de host, usuarios, systemd)
+internal/ops                 operaciones de automatización (una por módulo del enunciado)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -134,6 +134,16 @@ Decisiones de diseño (útiles para la documentación):
   start/stop/restart/status/enable/disable funcionan sobre cualquier unidad,
   comprueban el estado resultante y muestran `systemctl status`; no se
   permite detener ni deshabilitar `ssh`, la red ni servicios básicos.
+- **HAProxy (3.4):** la aplicación solo edita su propio bloque de
+  `haproxy.cfg`, entre marcas (`frontend np2_balanceador`, `backend
+  np2_servidores`, y estadísticas en `127.0.0.1:8404`); el resto del archivo
+  queda igual. El cambio se arma en Go, se valida con `haproxy -c` sobre un
+  archivo temporal, se instala con copia (`haproxy.cfg.np2-prev`) y se
+  recarga; si HAProxy no queda activo se restaura la copia. Se comprueba que
+  el archivo no haya cambiado entre la lectura y la escritura (sha256). Cada
+  respuesta lleva la cabecera `X-Servidor` con el servidor que la atendió, y
+  "Probar el balanceo" hace peticiones desde la VM para mostrar el reparto.
+  El estado de cada servidor (UP/DOWN) se lee de las estadísticas en CSV.
 - **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
   en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
   `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`

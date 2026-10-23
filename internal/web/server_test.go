@@ -95,7 +95,7 @@ func TestPagesRender(t *testing.T) {
 		"/prep/packages":         "Instalar y eliminar aplicaciones",
 		"/prep/issue":            "Aplicar en /etc/issue",
 		"/journal":               "Registro de operaciones",
-		"/m/haproxy":             "Agregar un servidor al backend",
+		"/haproxy":               "Agregar un servidor al backend",
 		"/services":              "Desplegar servicio",
 		"/users/create":          "Privilegios de sudo",
 		"/users/delete":          "Eliminar también todos sus archivos",
@@ -106,8 +106,8 @@ func TestPagesRender(t *testing.T) {
 			t.Errorf("%s: status %d, no contiene %q", path, resp.StatusCode, want)
 		}
 	}
-	if resp, _ := get(t, ts, "/m/no-existe"); resp.StatusCode != 404 {
-		t.Errorf("módulo inexistente: %d", resp.StatusCode)
+	if resp, _ := get(t, ts, "/no-existe"); resp.StatusCode != 404 {
+		t.Errorf("página inexistente: %d", resp.StatusCode)
 	}
 }
 
@@ -379,5 +379,41 @@ func TestServicesForm(t *testing.T) {
 	_, body = post(t, ts, "/services", form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot"))
 	if !strings.Contains(body, `id="unit" name="unit" value="fecha"`) {
 		t.Errorf("el formulario de gestión debe quedar con la unidad desplegada")
+	}
+}
+
+func TestHAProxyForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Sin VM elegida se propone la del balanceador.
+	_, body := get(t, ts, "/haproxy")
+	if !strings.Contains(body, `<option value="balancer" selected>`) {
+		t.Errorf("debía elegir la VM del balanceador")
+	}
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	for _, c := range []struct {
+		form url.Values
+		want string
+	}{
+		{form("action", "add", "name", "web 1", "addr", "192.168.1.70", "port", "8080"), "nombre de servidor inválido"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70;id", "port", "8080"), "dirección inválida"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "x"), "puerto del servidor"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080", "frontport", "70000"), "puerto del balanceador"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080", "balance", "random"), "algoritmo de balanceo desconocido"},
+		{form("action", "remove", "rname", "a;b"), "nombre de servidor inválido"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080"), "no se encuentra la llave privada"},
+		{form("action", "remove", "rname", "web1"), "no se encuentra la llave privada"},
+		{form("action", "test"), "no se encuentra la llave privada"},
+		{form("action", "state"), "no se encuentra la llave privada"},
+	} {
+		_, body := post(t, ts, "/haproxy", c.form)
+		if !strings.Contains(body, c.want) {
+			t.Errorf("%v: no contiene %q", c.form, c.want)
+		}
 	}
 }

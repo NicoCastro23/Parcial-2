@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -18,7 +19,6 @@ import (
 type navItem struct {
 	Title string
 	Path  string
-	Done  bool // el módulo ya está implementado
 }
 
 type navSection struct {
@@ -28,32 +28,23 @@ type navSection struct {
 
 var nav = []navSection{
 	{"General", []navItem{
-		{"Conexión con las VMs", "/connection", true},
-		{"Registro de operaciones", "/journal", true},
+		{"Conexión con las VMs", "/connection"},
+		{"Registro de operaciones", "/journal"},
 	}},
 	{"Preparación del sistema", []navItem{
-		{"Instalar y eliminar aplicaciones", "/prep/packages", true},
-		{"Llave SSH del usuario root", "/prep/rootkey", true},
-		{"Pantalla de entrada (/etc/issue)", "/prep/issue", true},
-		{"Nombre de host y /etc/hosts", "/prep/hostname", true},
+		{"Instalar y eliminar aplicaciones", "/prep/packages"},
+		{"Llave SSH del usuario root", "/prep/rootkey"},
+		{"Pantalla de entrada (/etc/issue)", "/prep/issue"},
+		{"Nombre de host y /etc/hosts", "/prep/hostname"},
 	}},
 	{"Gestión de usuarios", []navItem{
-		{"Crear usuarios", "/users/create", true},
-		{"Eliminar usuarios", "/users/delete", true},
+		{"Crear usuarios", "/users/create"},
+		{"Eliminar usuarios", "/users/delete"},
 	}},
 	{"Servicios", []navItem{
-		{"Demonios con systemd", "/services", true},
-		{"Balanceador HAProxy", "/m/haproxy", false},
+		{"Demonios con systemd", "/services"},
+		{"Balanceador HAProxy", "/haproxy"},
 	}},
-}
-
-// pendingModule describe lo que exige el enunciado de un módulo aún no hecho.
-type pendingModule struct {
-	Title, Ref, Summary string
-}
-
-var pending = map[string]pendingModule{
-	"haproxy": {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
 }
 
 // page es el modelo común de todas las plantillas.
@@ -73,13 +64,13 @@ type page struct {
 	Root        *ops.RootKeyResult
 	DownloadURL string
 	Entries     []runner.Entry
-	Pending     *pendingModule
 
 	// Módulos que usan ops.Result (resultado por pasos) y un formulario.
 	Op          *ops.Result
 	Form        map[string]string
 	IssueFields []issueCheckbox
 	User        *ops.UserResult
+	Algorithms  [][2]string
 }
 
 func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
@@ -505,6 +496,75 @@ func serviceInput(f map[string]string) (ops.ServiceInput, error) {
 	return in, in.Validate()
 }
 
+// ---- Balanceador HAProxy (3.4) ----
+
+func (s *Server) haproxyPage(r *http.Request) page {
+	// Sin VM elegida, se propone la del balanceador.
+	if r.FormValue("t") == "" {
+		if _, ok := s.cfg.Target("balancer"); ok {
+			q := r.URL.Query()
+			q.Set("t", "balancer")
+			r.URL.RawQuery = q.Encode()
+			r.Form = nil
+		}
+	}
+	p, _ := s.newPage(r, "Balanceador HAProxy", "/haproxy")
+	p.Algorithms = ops.LBAlgorithms()
+	return p
+}
+
+func (s *Server) handleHAProxy(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "haproxy", s.haproxyPage(r))
+}
+
+func (s *Server) handleHAProxyRun(w http.ResponseWriter, r *http.Request) {
+	p := s.haproxyPage(r)
+	p.Form = nonEmpty(formValues(r, "name", "addr", "port", "frontport", "balance", "rname", "action"))
+	switch p.Form["action"] {
+	case "add":
+		in, err := lbAddInput(p.Form)
+		if err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "Servidor "+in.Name+" agregado al backend.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.AddServer(ctx, rn, in)
+		})
+	case "remove":
+		name := p.Form["rname"]
+		if err := validate.ServerName(name); err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "Servidor "+name+" eliminado del backend.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.RemoveServer(ctx, rn, name)
+		})
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado consultado.", ops.LBState)
+	case "test":
+		s.runOp(r, &p, 3*time.Minute, "Prueba de balanceo completada.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.TestBalancer(ctx, rn, 6)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "haproxy", p)
+}
+
+func lbAddInput(f map[string]string) (ops.LBAddInput, error) {
+	in := ops.LBAddInput{Name: f["name"], Addr: strings.ToLower(f["addr"]), Balance: f["balance"]}
+	var err error
+	if in.Port, err = validate.Port(f["port"]); err != nil {
+		return in, fmt.Errorf("puerto del servidor: %w", err)
+	}
+	if f["frontport"] != "" {
+		if in.FrontPort, err = validate.Port(f["frontport"]); err != nil {
+			return in, fmt.Errorf("puerto del balanceador: %w", err)
+		}
+	}
+	return in, in.Validate()
+}
+
 // ---- Nombre de host y /etc/hosts (3.1.4) ----
 
 func (s *Server) handleHostname(w http.ResponseWriter, r *http.Request) {
@@ -544,15 +604,4 @@ func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	p.Entries = entries
 	s.render(w, "journal", p)
-}
-
-func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
-	m, ok := pending[r.PathValue("slug")]
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	p, _ := s.newPage(r, m.Title, "/m/"+r.PathValue("slug"))
-	p.Pending = &m
-	s.render(w, "pending", p)
 }
