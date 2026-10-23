@@ -156,9 +156,9 @@ func (s *Server) runnerFor(t config.Target) (runner.Runner, error) {
 		if t.KeyPath == "" {
 			return nil, fmt.Errorf("el destino %q no tiene una llave configurada (campo \"key\")", t.ID)
 		}
-		key := config.ExpandHome(t.KeyPath)
-		if _, err := os.Stat(key); err != nil {
-			return nil, fmt.Errorf("no se encuentra la llave privada %s: configure \"key\" o use el módulo de la llave SSH de root", key)
+		key, err := s.findKey(t.KeyPath)
+		if err != nil {
+			return nil, err
 		}
 		rn = &runner.SSH{
 			Host: t.Host, Port: t.Port, User: t.User, KeyPath: key,
@@ -186,6 +186,35 @@ func (s *Server) runnerFor(t config.Target) (runner.Runner, error) {
 	return runner.Journaled{Runner: rn, J: s.journal, Target: t.ID}, nil
 }
 
+// findKey ubica la llave privada de un destino. Si no está en la ruta
+// guardada (p. ej. porque la carpeta de la aplicación se movió o se clonó de
+// nuevo), la busca por su nombre en la carpeta de llaves actual.
+func (s *Server) findKey(saved string) (string, error) {
+	key := config.ExpandHome(saved)
+	if _, err := os.Stat(key); err == nil {
+		return key, nil
+	}
+	alt := filepath.Join(s.dataDir, "keys", filepath.Base(key))
+	if _, err := os.Stat(alt); err == nil {
+		return alt, nil
+	}
+	return "", fmt.Errorf("no se encuentra la llave privada %s (tampoco en %s). Si conserva la llave que descargó, copie ese archivo a %s o ponga su ruta en \"key\" de config.json. Si no la tiene: en «Conexión con las VMs» cambie el canal a Guest Additions y vuelva a ejecutar «Llave SSH del usuario root»", key, filepath.Dir(alt), alt)
+}
+
+// portablePath guarda las rutas dentro de la carpeta de la aplicación como
+// relativas (data/keys/...), para que la carpeta se pueda mover o copiar.
+func (s *Server) portablePath(p string) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return p
+	}
+	rel, err := filepath.Rel(wd, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return p
+	}
+	return rel
+}
+
 // operationEnv prepara el entorno de una operación sobre un destino.
 func (s *Server) operationEnv(t config.Target, rn runner.Runner) ops.Env {
 	return ops.Env{
@@ -195,7 +224,7 @@ func (s *Server) operationEnv(t config.Target, rn runner.Runner) ops.Env {
 			return s.cfg.Update(t.ID, func(x *config.Target) {
 				x.Transport = config.TransportSSH
 				x.User = "root"
-				x.KeyPath = keyPath
+				x.KeyPath = s.portablePath(keyPath)
 			})
 		},
 	}
