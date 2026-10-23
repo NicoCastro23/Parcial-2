@@ -93,3 +93,9 @@ pre.out { background: var(--out-bg); color: var(--out-text); padding: 12px 14px;
   .shell { grid-template-columns: 1fr; }
   .side { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+.form { display: grid; gap: 6px; max-width: 520px; }
+.form label { font-weight: 600; margin-top: 8px; }
+.form small { color: var(--muted); }
+.form .row { margin-top: 12px; gap: 10px; }
+input[type="text"], input:not([type]) { font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); width: 100%; }

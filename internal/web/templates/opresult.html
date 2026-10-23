@@ -1,0 +1,14 @@
+{{define "opresult"}}{{with .Op}}
+<section class="card">
+  <h2>{{if .OK}}Resultado: operación completada{{else}}Resultado: la operación no se completó{{end}}</h2>
+  <ol class="steps">
+    {{range .Steps}}
+    <li class="{{if .OK}}ok{{else}}fail{{end}}">
+      <div class="stepline"><span class="mark" aria-hidden="true">{{if .OK}}✓{{else}}✗{{end}}</span>
+        <span><strong>{{.Name}}</strong><br>{{.Detail}}</span></div>
+      {{if .Technical}}<details><summary>Detalle técnico</summary><pre class="out">{{.Technical}}</pre></details>{{end}}
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}{{end}}

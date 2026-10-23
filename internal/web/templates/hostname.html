@@ -1,0 +1,28 @@
+{{define "content"}}
+<p class="lead">Asigna el nombre de host de la VM y actualiza <code>/etc/hosts</code> para que el nombre nuevo resuelva a <code>127.0.1.1</code>, como lo hace Debian al instalarse.</p>
+
+<section class="card">
+  <h2>Nuevo nombre para {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <form method="post" action="/prep/hostname" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="name">Nombre de host</label>
+    <input id="name" name="name" value="{{index .Form "name"}}" placeholder="web1" maxlength="63"
+           pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" autocomplete="off" spellcheck="false" required>
+    <small>Minúsculas, dígitos y guiones; sin puntos ni espacios. Máximo 63 caracteres.</small>
+    <label for="domain">Dominio (opcional)</label>
+    <input id="domain" name="domain" value="{{index .Form "domain"}}" placeholder="lab.local" maxlength="200" autocomplete="off" spellcheck="false">
+    <small>Si lo indica, <code>/etc/hosts</code> tendrá <code>127.0.1.1 nombre.dominio nombre</code>.</small>
+    <div class="row">
+      <button type="submit" name="action" value="apply" class="primary">Aplicar nombre de host</button>
+      <button type="submit" name="action" value="state" formnovalidate>Consultar estado actual</button>
+    </div>
+  </form>
+</section>
+
+{{template "opresult" .}}
+
+{{if and .Op .Op.OK (eq (index .Form "action") "apply")}}
+<p class="note">El indicador de las sesiones ya abiertas en la VM (por ejemplo <code>root@debian</code>) cambia al volver a iniciar sesión. <code>hostnamectl</code> y <code>/etc/hostname</code> ya muestran el nombre nuevo.</p>
+{{end}}
+{{end}}

@@ -2,8 +2,10 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"np2auto/internal/config"
@@ -32,7 +34,7 @@ var nav = []navSection{
 		{"Instalar y eliminar aplicaciones", "/m/packages", false},
 		{"Llave SSH del usuario root", "/prep/rootkey", true},
 		{"Pantalla de entrada (/etc/issue)", "/m/issue", false},
-		{"Nombre de host y /etc/hosts", "/m/hostname", false},
+		{"Nombre de host y /etc/hosts", "/prep/hostname", true},
 	}},
 	{"Gestión de usuarios", []navItem{
 		{"Crear usuarios", "/m/users-create", false},
@@ -52,7 +54,6 @@ type pendingModule struct {
 var pending = map[string]pendingModule{
 	"packages":     {"Instalar y eliminar aplicaciones", "3.1.1", "Formulario para indicar la aplicación; botones Instalar y Eliminar; el resultado se informa en la aplicación."},
 	"issue":        {"Pantalla de entrada (/etc/issue)", "3.1.3", "Establecer /etc/issue con opciones para mostrar nombre de host, fecha, hora y dirección IP, más un mensaje personalizado."},
-	"hostname":     {"Nombre de host y /etc/hosts", "3.1.4", "Establecer el nombre de host del sistema y actualizar /etc/hosts para que lo incluya."},
 	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
 	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
 	"services":     {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
@@ -77,6 +78,10 @@ type page struct {
 	DownloadURL string
 	Entries     []runner.Entry
 	Pending     *pendingModule
+
+	// Módulos que usan ops.Result (resultado por pasos) y un formulario.
+	Op   *ops.Result
+	Form map[string]string
 }
 
 func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
@@ -216,6 +221,73 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+e.name+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(data)
+}
+
+// ---- Operaciones por pasos (módulos 3.1.1, 3.1.3, 3.1.4, 3.2, 3.3, 3.4) ----
+
+// runOp ejecuta una operación sobre la VM elegida con las mismas reglas para
+// todos los módulos: una operación a la vez por VM, el canal actual (Guest
+// Additions o SSH) y un límite de tiempo propio. Deja el resultado en p.Op y
+// el mensaje general en p.Flash o p.FlashErr.
+func (s *Server) runOp(r *http.Request, p *page, timeout time.Duration, okMsg string, fn func(ctx context.Context, rn runner.Runner) *ops.Result) {
+	unlock, ok := s.locks.try(p.Cur.ID)
+	if !ok {
+		p.FlashErr = "Ya hay una operación en curso sobre esta VM. Espere a que termine."
+		return
+	}
+	defer unlock()
+	rn, err := s.runnerFor(p.Cur)
+	if err != nil {
+		p.FlashErr = err.Error()
+		return
+	}
+	ctx, cancel := opContext(r, timeout)
+	defer cancel()
+	p.Op = fn(ctx, rn)
+	if p.Op.OK {
+		p.Flash = okMsg
+	} else {
+		p.FlashErr = "La operación no se completó. Revise el paso marcado con ✗; su detalle técnico queda también en el Registro de operaciones."
+	}
+}
+
+// formValues copia los campos indicados del formulario para volver a
+// mostrarlos en la página.
+func formValues(r *http.Request, keys ...string) map[string]string {
+	m := make(map[string]string, len(keys))
+	for _, k := range keys {
+		m[k] = strings.TrimSpace(r.PostFormValue(k))
+	}
+	return m
+}
+
+// ---- Nombre de host y /etc/hosts (3.1.4) ----
+
+func (s *Server) handleHostname(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Nombre de host y /etc/hosts", "/prep/hostname")
+	s.render(w, "hostname", p)
+}
+
+func (s *Server) handleHostnameRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Nombre de host y /etc/hosts", "/prep/hostname")
+	p.Form = formValues(r, "name", "domain", "action")
+	if p.Form["action"] == "state" {
+		s.runOp(r, &p, 2*time.Minute, "Estado actual consultado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.HostnameState(ctx, rn)
+		})
+		s.render(w, "hostname", p)
+		return
+	}
+	in := ops.HostnameInput{Name: strings.ToLower(p.Form["name"]), Domain: strings.ToLower(p.Form["domain"])}
+	if err := in.Validate(); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "hostname", p)
+		return
+	}
+	s.runOp(r, &p, 5*time.Minute, "Nombre de host asignado y /etc/hosts actualizado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		return ops.SetHostname(ctx, rn, in)
+	})
+	s.render(w, "hostname", p)
 }
 
 // ---- Registro y módulos pendientes ----

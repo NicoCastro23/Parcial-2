@@ -97,6 +97,20 @@ func Hostname(s string) error {
 	return nil
 }
 
+// Domain valida un dominio DNS (p. ej. "lab.local"): etiquetas RFC 1123
+// separadas por puntos, en minúsculas, máximo 200 caracteres.
+func Domain(s string) error {
+	if s == "" || len(s) > 200 {
+		return fmt.Errorf("dominio inválido %q: debe tener entre 1 y 200 caracteres", s)
+	}
+	for _, label := range strings.Split(s, ".") {
+		if !reLabel.MatchString(label) {
+			return fmt.Errorf("dominio inválido %q: use etiquetas en minúsculas, dígitos y guiones separadas por puntos (p. ej. lab.local)", s)
+		}
+	}
+	return nil
+}
+
 // Port convierte y valida un número de puerto TCP.
 func Port(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))

@@ -91,6 +91,7 @@ func TestPagesRender(t *testing.T) {
 	for path, want := range map[string]string{
 		"/connection":            "Conexión con las VMs",
 		"/prep/rootkey":          "Configurar llave de root",
+		"/prep/hostname":         "Aplicar nombre de host",
 		"/journal":               "Registro de operaciones",
 		"/m/haproxy":             "Agregar un servidor al backend",
 		"/m/users-create":        "casilla de sudo",
@@ -197,5 +198,27 @@ func TestLockSet(t *testing.T) {
 	unlock()
 	if _, ok := l.try("a"); !ok {
 		t.Error("tras liberar debe poder bloquearse")
+	}
+}
+
+func TestHostnameForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Datos inválidos: se rechazan antes de tocar la VM y se conservan en el formulario.
+	_, body := post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"web1;reboot"}})
+	if !strings.Contains(body, "nombre de host inválido") || !strings.Contains(body, `value="web1;reboot"`) {
+		t.Errorf("debía rechazar el nombre inválido:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"web1"}, "domain": {"lab..local"}})
+	if !strings.Contains(body, "dominio inválido") {
+		t.Errorf("debía rechazar el dominio inválido:\n%s", body)
+	}
+	// Datos válidos: llega hasta el canal, que aquí falla porque la llave no existe.
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"Web1"}})
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("debía intentar conectar:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"state"}})
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("consultar estado debía intentar conectar:\n%s", body)
 	}
 }

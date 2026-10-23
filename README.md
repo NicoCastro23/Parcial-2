@@ -13,7 +13,7 @@ interactiva.
 | 3.1.2 | Llave SSH de root (crear, autorizar, sin contraseña, descargar) | **Hecho y probado** |
 | 3.1.1 | Instalar / eliminar aplicaciones | Pendiente |
 | 3.1.3 | Pantalla de entrada `/etc/issue` | Pendiente |
-| 3.1.4 | Nombre de host y `/etc/hosts` | Pendiente |
+| 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.2.1 / 3.2.2 | Crear / eliminar usuarios | Pendiente |
 | 3.3 | Servicios systemd | Pendiente |
 | 3.4 | HAProxy: agregar / quitar servidor del backend | Pendiente |
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (hoy: llave SSH de root)
+internal/ops                 operaciones de automatización (llave SSH de root, nombre de host)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -93,6 +93,10 @@ Decisiones de diseño (útiles para la documentación):
   que termina sola. Solo una operación a la vez por VM.
 - **Protección de la propia consola** (ejecuta comandos como root): escucha en
   `127.0.0.1`, rechaza `Host` ajenos (DNS rebinding) y exige token CSRF en todo POST.
+- **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
+  en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
+  `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`
+  y la pantalla muestra el estado antes y después, útil para los videos.
 - **Registro de operaciones** (`data/logs/operaciones.jsonl`, también en la
   pantalla "Registro"): qué se ejecutó, dónde, qué respondió y cuánto tardó.
   Es la información técnica para diagnóstico y para las evidencias de prueba.

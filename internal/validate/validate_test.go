@@ -171,3 +171,16 @@ func TestID(t *testing.T) {
 		}
 	}
 }
+
+func TestDomain(t *testing.T) {
+	for _, ok := range []string{"lab.local", "local", "uq.edu.co", "a-1.b2"} {
+		if err := Domain(ok); err != nil {
+			t.Errorf("%q debería ser válido: %v", ok, err)
+		}
+	}
+	for _, bad := range append([]string{"Lab.local", ".local", "lab..local", "lab.local.", "-a.b", "a_b.c", strings.Repeat("a.", 101) + "a"}, injections...) {
+		if err := Domain(bad); err == nil {
+			t.Errorf("%q debería ser inválido", bad)
+		}
+	}
+}

@@ -18,7 +18,8 @@ func WithOp(ctx context.Context, op string) context.Context {
 	return context.WithValue(ctx, opKey{}, op)
 }
 
-func opFrom(ctx context.Context) string {
+// OpFrom devuelve la etiqueta puesta con WithOp ("" si no hay).
+func OpFrom(ctx context.Context) string {
 	op, _ := ctx.Value(opKey{}).(string)
 	return op
 }
@@ -113,7 +114,7 @@ type Journaled struct {
 func (j Journaled) Run(ctx context.Context, script string) (Result, error) {
 	res, err := j.Runner.Run(ctx, script)
 	e := Entry{
-		Time: res.Started, Target: j.Target, Op: opFrom(ctx),
+		Time: res.Started, Target: j.Target, Op: OpFrom(ctx),
 		Transport: j.Runner.Transport(), Command: res.Command, Script: res.Script,
 		ExitCode: res.ExitCode, DurationMs: res.Duration.Milliseconds(),
 		Stdout: res.Stdout, Stderr: res.Stderr,
