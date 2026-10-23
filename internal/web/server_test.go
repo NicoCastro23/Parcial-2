@@ -92,6 +92,7 @@ func TestPagesRender(t *testing.T) {
 		"/connection":            "Conexión con las VMs",
 		"/prep/rootkey":          "Configurar llave de root",
 		"/prep/hostname":         "Aplicar nombre de host",
+		"/prep/packages":         "Instalar y eliminar aplicaciones",
 		"/journal":               "Registro de operaciones",
 		"/m/haproxy":             "Agregar un servidor al backend",
 		"/m/users-create":        "casilla de sudo",
@@ -220,5 +221,38 @@ func TestHostnameForm(t *testing.T) {
 	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"state"}})
 	if !strings.Contains(body, "no se encuentra la llave privada") {
 		t.Errorf("consultar estado debía intentar conectar:\n%s", body)
+	}
+}
+
+func TestPackagesForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+	with := func(kv ...string) url.Values {
+		v := url.Values{}
+		for k, x := range base {
+			v[k] = x
+		}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body := post(t, ts, "/prep/packages", with("action", "install", "packages", "vim; reboot"))
+	if !strings.Contains(body, "nombre de paquete inválido") {
+		t.Errorf("debía rechazar la inyección:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/packages", with("action", "install", "packages", "  "))
+	if !strings.Contains(body, "indique al menos un paquete") {
+		t.Errorf("debía pedir un paquete:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/packages", with("action", "upgrade", "packages", "htop"))
+	if !strings.Contains(body, "Acción desconocida") {
+		t.Errorf("debía rechazar la acción:\n%s", body)
+	}
+	for _, action := range []string{"install", "remove", "state"} {
+		_, body = post(t, ts, "/prep/packages", with("action", action, "packages", "HTOP, tree", "purge", "yes"))
+		if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, `value="HTOP, tree"`) || !strings.Contains(body, "checked") {
+			t.Errorf("%s: debía intentar conectar y conservar el formulario:\n%s", action, body)
+		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"np2auto/internal/config"
 	"np2auto/internal/ops"
 	"np2auto/internal/runner"
+	"np2auto/internal/validate"
 )
 
 // navItem y navSection arman el menú lateral.
@@ -31,7 +32,7 @@ var nav = []navSection{
 		{"Registro de operaciones", "/journal", true},
 	}},
 	{"Preparación del sistema", []navItem{
-		{"Instalar y eliminar aplicaciones", "/m/packages", false},
+		{"Instalar y eliminar aplicaciones", "/prep/packages", true},
 		{"Llave SSH del usuario root", "/prep/rootkey", true},
 		{"Pantalla de entrada (/etc/issue)", "/m/issue", false},
 		{"Nombre de host y /etc/hosts", "/prep/hostname", true},
@@ -52,7 +53,6 @@ type pendingModule struct {
 }
 
 var pending = map[string]pendingModule{
-	"packages":     {"Instalar y eliminar aplicaciones", "3.1.1", "Formulario para indicar la aplicación; botones Instalar y Eliminar; el resultado se informa en la aplicación."},
 	"issue":        {"Pantalla de entrada (/etc/issue)", "3.1.3", "Establecer /etc/issue con opciones para mostrar nombre de host, fecha, hora y dirección IP, más un mensaje personalizado."},
 	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
 	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
@@ -259,6 +259,42 @@ func formValues(r *http.Request, keys ...string) map[string]string {
 		m[k] = strings.TrimSpace(r.PostFormValue(k))
 	}
 	return m
+}
+
+// ---- Instalar y eliminar aplicaciones (3.1.1) ----
+
+func (s *Server) handlePackages(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Instalar y eliminar aplicaciones", "/prep/packages")
+	s.render(w, "packages", p)
+}
+
+func (s *Server) handlePackagesRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Instalar y eliminar aplicaciones", "/prep/packages")
+	p.Form = formValues(r, "packages", "purge", "action")
+	pkgs, err := validate.PackageList(strings.ToLower(p.Form["packages"]))
+	if err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "packages", p)
+		return
+	}
+	switch action := p.Form["action"]; action {
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado consultado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.PackagesState(ctx, rn, pkgs)
+		})
+	case ops.PkgInstall, ops.PkgRemove:
+		in := ops.PackagesInput{Action: action, Packages: pkgs, Purge: p.Form["purge"] == "yes"}
+		msg := "Instalación completada: " + strings.Join(pkgs, ", ") + "."
+		if action == ops.PkgRemove {
+			msg = "Eliminación completada: " + strings.Join(pkgs, ", ") + "."
+		}
+		s.runOp(r, &p, 30*time.Minute, msg, func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.ManagePackages(ctx, rn, in)
+		})
+	default:
+		p.FlashErr = "Acción desconocida: use Instalar, Eliminar o Consultar estado."
+	}
+	s.render(w, "packages", p)
 }
 
 // ---- Nombre de host y /etc/hosts (3.1.4) ----

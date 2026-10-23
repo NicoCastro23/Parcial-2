@@ -1,0 +1,24 @@
+{{define "content"}}
+<p class="lead">Instala o elimina aplicaciones (paquetes de Debian) en la VM con <code>apt</code>, sin preguntas interactivas. Al terminar se comprueba con <code>dpkg</code> que el estado final sea el pedido.</p>
+
+<section class="card">
+  <h2>Paquetes en {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <form method="post" action="/prep/packages" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="packages">Aplicaciones (nombres de paquete)</label>
+    <input id="packages" name="packages" value="{{index .Form "packages"}}" placeholder="htop tree" maxlength="600" autocomplete="off" spellcheck="false" required>
+    <small>Uno o varios (máximo 10), separados por espacios o comas. Ejemplos: <code>htop</code>, <code>tree</code>, <code>apache2</code>, <code>nginx</code>.</small>
+    <label class="check"><input type="checkbox" name="purge" value="yes"{{if eq (index .Form "purge") "yes"}} checked{{end}}>
+      <span>Al eliminar, borrar también los archivos de configuración (<code>apt-get purge</code>).</span></label>
+    <div class="row">
+      <button type="submit" name="action" value="install" class="primary">Instalar</button>
+      <button type="submit" name="action" value="remove" class="danger">Eliminar</button>
+      <button type="submit" name="action" value="state">Consultar estado</button>
+    </div>
+  </form>
+  <p class="note">Antes de eliminar se simula la operación (<code>apt-get -s</code>). Si arrastraría paquetes necesarios para administrar la VM (SSH, sudo, red, arranque), se cancela sin cambiar nada. La instalación puede tardar varios minutos: no cierre la página.</p>
+</section>
+
+{{template "opresult" .}}
+{{end}}

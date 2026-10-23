@@ -99,3 +99,6 @@ pre.out { background: var(--out-bg); color: var(--out-text); padding: 12px 14px;
 .form small { color: var(--muted); }
 .form .row { margin-top: 12px; gap: 10px; }
 input[type="text"], input:not([type]) { font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); width: 100%; }
+.danger { color: var(--err); border-color: var(--err); font-weight: 600; }
+.danger:hover { background: var(--err-bg); border-color: var(--err); }
+.form .check { margin: 10px 0 0; font-weight: 400; }

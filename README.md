@@ -11,7 +11,7 @@ interactiva.
 |---|---|---|
 | 3 (canales) | Guest Additions antes de SSH · SSH con llaves después | Núcleo hecho. SSH **probado contra un sshd real**; Guest Additions **sin probar con VirtualBox real** (ver "Pendiente de verificar") |
 | 3.1.2 | Llave SSH de root (crear, autorizar, sin contraseña, descargar) | **Hecho y probado** |
-| 3.1.1 | Instalar / eliminar aplicaciones | Pendiente |
+| 3.1.1 | Instalar / eliminar aplicaciones | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.1.3 | Pantalla de entrada `/etc/issue` | Pendiente |
 | 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.2.1 / 3.2.2 | Crear / eliminar usuarios | Pendiente |
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (llave SSH de root, nombre de host)
+internal/ops                 operaciones de automatización (llave SSH de root, paquetes, nombre de host)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -93,6 +93,13 @@ Decisiones de diseño (útiles para la documentación):
   que termina sola. Solo una operación a la vez por VM.
 - **Protección de la propia consola** (ejecuta comandos como root): escucha en
   `127.0.0.1`, rechaza `Host` ajenos (DNS rebinding) y exige token CSRF en todo POST.
+- **Paquetes (3.1.1):** `apt-get` no interactivo (`DEBIAN_FRONTEND=noninteractive`,
+  `--force-confold`, espera el bloqueo de apt hasta 3 min). Antes de instalar se
+  comprueba que el paquete exista (mensaje claro en vez del error de apt). Antes
+  de eliminar se **simula** (`apt-get -s`) y se cancela si la eliminación
+  arrastraría paquetes necesarios para administrar la VM (SSH, sudo, red,
+  arranque): por ejemplo, quitar `openssh-client` arrastra `openssh-server`.
+  Al final se comprueba con `dpkg-query` que el estado sea el pedido.
 - **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
   en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
   `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`
