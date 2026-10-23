@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,16 @@ type fakeRunner struct {
 	scripts []string
 	failOn  string            // sub-operación que debe fallar, p. ej. "hostname/hosts"
 	stdout  map[string]string // salida simulada por sub-operación
+	upload  []byte            // lo recibido por RunInput (transferencias)
+}
+
+func (f *fakeRunner) RunInput(ctx context.Context, script string, in io.Reader) (runner.Result, error) {
+	b, err := io.ReadAll(in)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	f.upload = b
+	return f.Run(ctx, script)
 }
 
 func (f *fakeRunner) Transport() string { return "ssh" }

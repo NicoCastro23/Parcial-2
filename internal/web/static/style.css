@@ -108,3 +108,4 @@ fieldset.checks legend { font-weight: 600; padding: 0 6px; }
 fieldset.checks .check { margin: 8px 0 0; }
 pre.console { font-size: 1em; line-height: 1.4; }
 input:disabled { opacity: .55; cursor: not-allowed; }
+.row.actions button { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-width: 84px; }

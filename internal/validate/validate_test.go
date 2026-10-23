@@ -210,3 +210,42 @@ func TestPassword(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceFields(t *testing.T) {
+	for _, ok := range []string{"catalogo", "fecha-hora", "app2"} {
+		if err := ServiceName(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range append([]string{"ssh.service", "Catalogo", "2app", "a", strings.Repeat("a", 29)}, injections...) {
+		if err := ServiceName(bad); err == nil {
+			t.Errorf("servicio %q debería ser inválido", bad)
+		}
+	}
+	for _, ok := range []string{"catalogo", "bin/app", "scripts/fecha.sh", "app-linux_amd64"} {
+		if err := RelPath(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"/bin/sh", "../x", "a/../b", "a//b", "a b", "./app", "a;id", ""} {
+		if err := RelPath(bad); err == nil {
+			t.Errorf("ruta %q debería ser inválida", bad)
+		}
+	}
+	if got, err := ExecArgs("  --port=8080 -addr :9000 "); err != nil || len(got) != 3 {
+		t.Errorf("ExecArgs: %v %v", got, err)
+	}
+	for _, bad := range []string{"$HOME", "%h", "'x'", `"x"`, "a;b", "$(id)", "a|b", `a\b`} {
+		if _, err := ExecArgs(bad); err == nil {
+			t.Errorf("argumento %q debería ser inválido", bad)
+		}
+	}
+	if got, err := EnvVars("PORT=8080 GIN_MODE=release DB=/opt/x/db.sqlite EMPTY="); err != nil || len(got) != 4 {
+		t.Errorf("EnvVars: %v %v", got, err)
+	}
+	for _, bad := range []string{"port=1", "PORT", "A=$B", "A=a b", "A='x'", "1A=x"} {
+		if _, err := EnvVars(bad); err == nil {
+			t.Errorf("variable %q debería ser inválida", bad)
+		}
+	}
+}

@@ -96,6 +96,7 @@ func TestPagesRender(t *testing.T) {
 		"/prep/issue":            "Aplicar en /etc/issue",
 		"/journal":               "Registro de operaciones",
 		"/m/haproxy":             "Agregar un servidor al backend",
+		"/services":              "Desplegar servicio",
 		"/users/create":          "Privilegios de sudo",
 		"/users/delete":          "Eliminar también todos sus archivos",
 		"/connection?t=balancer": "VM del balanceador",
@@ -333,5 +334,50 @@ func TestUserForms(t *testing.T) {
 	_, body = post(t, ts, "/users/delete", form("action", "delete", "name", "ana", "confirm", "yes", "remove_files", "yes"))
 	if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, "checked") {
 		t.Errorf("debía intentar conectar y conservar la casilla:\n%s", body)
+	}
+}
+
+func TestServicesForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body := get(t, ts, "/services?t=test")
+	for _, b := range []string{">start<", ">stop<", ">restart<", ">status<", ">enable<", ">disable<"} {
+		if !strings.Contains(body, b) {
+			t.Errorf("falta el botón %s", b)
+		}
+	}
+	app := filepath.Join(t.TempDir(), "fecha.sh")
+	os.WriteFile(app, []byte("#!/bin/bash\ndate\n"), 0o755)
+	cases := []struct {
+		form url.Values
+		want string
+	}{
+		{form("action", "deploy", "name", "Catalogo!", "source", app, "type", "simple"), "nombre de servicio inválido"},
+		{form("action", "deploy", "name", "fecha", "source", "fecha.sh", "type", "oneshot"), "ruta completa"},
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "args", "$(reboot)"), "argumento inválido"},
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "env", "a=b"), "variable inválida"},
+		{form("action", "status", "unit", "a;b"), "Indique la unidad"},
+		{form("action", "mask", "unit", "ssh"), "Acción desconocida"},
+		// Datos válidos: llega al canal (aquí falla porque la llave no existe).
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "start", "yes"), "no se encuentra la llave privada"},
+		{form("action", "restart", "unit", "fecha"), "no se encuentra la llave privada"},
+		{form("action", "list"), "no se encuentra la llave privada"},
+	}
+	for _, c := range cases {
+		_, body := post(t, ts, "/services", c.form)
+		if !strings.Contains(body, c.want) {
+			t.Errorf("%v: no contiene %q", c.form, c.want)
+		}
+	}
+	// Tras desplegar, la unidad queda lista en el formulario de gestión.
+	_, body = post(t, ts, "/services", form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot"))
+	if !strings.Contains(body, `id="unit" name="unit" value="fecha"`) {
+		t.Errorf("el formulario de gestión debe quedar con la unidad desplegada")
 	}
 }

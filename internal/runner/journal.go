@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +139,24 @@ type Journaled struct {
 
 func (j Journaled) Run(ctx context.Context, script string) (Result, error) {
 	res, err := j.Runner.Run(ctx, script)
+	j.record(ctx, res, err)
+	return res, err
+}
+
+// RunInput reenvía al canal si sabe transferir datos; si no (Guest
+// Additions), lo informa con un error comprensible.
+func (j Journaled) RunInput(ctx context.Context, script string, in io.Reader) (Result, error) {
+	u, ok := j.Runner.(Uploader)
+	if !ok {
+		err := &Error{Kind: KindExec, Result: Result{Script: script}, Err: errors.New("la transferencia de archivos requiere el canal SSH: configure primero la llave SSH de root")}
+		return err.Result, err
+	}
+	res, err := u.RunInput(ctx, script, in)
+	j.record(ctx, res, err)
+	return res, err
+}
+
+func (j Journaled) record(ctx context.Context, res Result, err error) {
 	e := Entry{
 		Time: res.Started, Target: j.Target, Op: OpFrom(ctx),
 		Transport: j.Runner.Transport(), Command: res.Command, Script: redact(ctx, res.Script),
@@ -152,5 +172,4 @@ func (j Journaled) Run(ctx context.Context, script string) (Result, error) {
 	if j.J != nil {
 		j.J.Append(e)
 	}
-	return res, err
 }

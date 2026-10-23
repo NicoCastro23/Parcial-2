@@ -1,0 +1,60 @@
+{{define "content"}}
+<p class="lead">Convierte una aplicación (por ejemplo, el catálogo de libros o un script) en un servicio de <code>systemd</code>: transfiere sus archivos a la VM por SSH, le crea un usuario propio con los permisos justos y registra la unidad. Abajo se gestiona cualquier unidad con <code>start</code>, <code>stop</code>, <code>restart</code>, <code>status</code>, <code>enable</code> y <code>disable</code>.</p>
+
+<section class="card">
+  <h2>1. Desplegar una aplicación como servicio en {{.Cur.Label}}</h2>
+  <form method="post" action="/services" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="name">Nombre del servicio</label>
+    <input id="name" name="name" value="{{index .Form "name"}}" placeholder="catalogo" maxlength="28" autocomplete="off" spellcheck="false">
+    <small>Se crea <code>/etc/systemd/system/&lt;nombre&gt;.service</code>, la carpeta <code>/opt/&lt;nombre&gt;</code> y el usuario <code>svc-&lt;nombre&gt;</code>.</small>
+    <label for="source">Archivos en este equipo (ruta completa)</label>
+    <input id="source" name="source" value="{{index .Form "source"}}" placeholder="/Users/ana/catalogo  o  /Users/ana/fecha.sh" autocomplete="off" spellcheck="false">
+    <small>Una carpeta con el ejecutable y lo que necesita (plantillas, estáticos, base de datos…) o un solo archivo. Se transfiere todo menos <code>.git</code> y <code>.DS_Store</code>.</small>
+    <label for="exec">Ejecutable dentro de la carpeta</label>
+    <input id="exec" name="exec" value="{{index .Form "exec"}}" placeholder="catalogo" autocomplete="off" spellcheck="false">
+    <small>Ruta relativa a la carpeta. Si indicó un solo archivo, déjelo vacío. Debe ser un binario de Linux (no de macOS) o un script con <code>#!</code>.</small>
+    <label for="args">Argumentos (opcional)</label>
+    <input id="args" name="args" value="{{index .Form "args"}}" placeholder="-port 8080" autocomplete="off" spellcheck="false">
+    <label for="env">Variables de entorno (opcional)</label>
+    <input id="env" name="env" value="{{index .Form "env"}}" placeholder="PORT=8080 GIN_MODE=release" autocomplete="off" spellcheck="false">
+    <label for="type">Tipo</label>
+    <select id="type" name="type">
+      <option value="simple"{{if ne (index .Form "type") "oneshot"}} selected{{end}}>simple: queda en ejecución (aplicación web); se reinicia si falla</option>
+      <option value="oneshot"{{if eq (index .Form "type") "oneshot"}} selected{{end}}>oneshot: se ejecuta y termina (script de fecha y hora)</option>
+    </select>
+    <label class="check"><input type="checkbox" name="lowports" value="yes"{{if index .Form "lowports"}} checked{{end}}><span>Permitir puertos menores que 1024 (p. ej. 80) sin ejecutarse como root</span></label>
+    <label class="check"><input type="checkbox" name="start" value="yes"{{if index .Form "start"}} checked{{end}}><span>Habilitar al arranque e iniciar ahora</span></label>
+    <div class="row">
+      <button type="submit" name="action" value="deploy" class="primary">Desplegar servicio</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>2. Gestionar una unidad</h2>
+  <form method="post" action="/services" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="unit">Unidad</label>
+    <input id="unit" name="unit" value="{{index .Form "unit"}}" placeholder="catalogo  (o ssh, haproxy, cron…)" autocomplete="off" spellcheck="false">
+    <small>Si no indica sufijo se usa <code>.service</code>. No se permite detener ni deshabilitar <code>ssh</code>, la red ni servicios básicos del sistema.</small>
+    <div class="row actions">
+      <button type="submit" name="action" value="start" class="primary">start</button>
+      <button type="submit" name="action" value="stop">stop</button>
+      <button type="submit" name="action" value="restart">restart</button>
+      <button type="submit" name="action" value="status">status</button>
+      <button type="submit" name="action" value="enable">enable</button>
+      <button type="submit" name="action" value="disable">disable</button>
+    </div>
+    <div class="row">
+      <button type="submit" name="action" value="list">Listar servicios desplegados</button>
+      <button type="submit" name="action" value="undeploy" class="danger"
+              onclick="return confirm('Se detendrá el servicio y se borrarán su unidad, /opt/<nombre> y el usuario svc-<nombre>. ¿Continuar?')">Desinstalar servicio</button>
+    </div>
+  </form>
+</section>
+
+{{template "opresult" .}}
+{{end}}

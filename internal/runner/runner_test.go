@@ -240,3 +240,18 @@ func TestSSHNoSudo(t *testing.T) {
 		}
 	}
 }
+
+func TestSSHRunInput(t *testing.T) {
+	fake := writeFake(t, `cat`)
+	s := &SSH{Host: "h", User: "root", KeyPath: "k", Bin: fake}
+	r, err := s.RunInput(context.Background(), "tar -x", strings.NewReader("datos-del-tar"))
+	if err != nil || r.Stdout != "datos-del-tar" {
+		t.Fatalf("la entrada estándar debe llegar al comando: %q %v", r.Stdout, err)
+	}
+	// Por Guest Additions no hay transferencia: error comprensible.
+	j := Journaled{Runner: &Guest{VM: "x", User: "root"}}
+	_, err = j.RunInput(context.Background(), "tar -x", strings.NewReader("x"))
+	if err == nil || !strings.Contains(Explain(err), "requiere el canal SSH") {
+		t.Errorf("Guest debe rechazar la transferencia: %v", err)
+	}
+}

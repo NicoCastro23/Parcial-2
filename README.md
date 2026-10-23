@@ -15,7 +15,7 @@ interactiva.
 | 3.1.3 | Pantalla de entrada `/etc/issue` | **Hecho** (pruebas unitarias y con `agetty` real; falta probar en la VM) |
 | 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.2.1 / 3.2.2 | Crear / eliminar usuarios | **Hecho** (pruebas unitarias; falta probar en la VM) |
-| 3.3 | Servicios systemd | Pendiente |
+| 3.3 | Servicios systemd | **Hecho** (pruebas unitarias; unidad validada con `systemd-analyze`; falta probar en la VM) |
 | 3.4 | HAProxy: agregar / quitar servidor del backend | Pendiente |
 
 ## Ejecutar
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (llave SSH de root, paquetes, /etc/issue, nombre de host, usuarios)
+internal/ops                 operaciones de automatización (llave SSH de root, paquetes, /etc/issue, nombre de host, usuarios, systemd)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -120,6 +120,20 @@ Decisiones de diseño (útiles para la documentación):
   usuario se elimina para no dejarlo a medio configurar. Al eliminar se
   protegen las cuentas del sistema (UID < 1000) y el usuario con el que la
   aplicación se conecta; se terminan sus procesos antes de `userdel [-r]`.
+- **Servicios systemd (3.3):** los archivos se toman de una ruta en el equipo
+  donde corre la consola (carpeta o archivo; sin límite del navegador y
+  conservando la estructura de carpetas) y viajan como `tar.gz` por la
+  entrada estándar de la misma conexión SSH, sin archivos temporales. Antes de
+  transferir se revisa que el ejecutable sea ELF o un script con `#!` (un
+  binario de macOS daría "Exec format error" en la VM). En la VM: usuario de
+  sistema `svc-<nombre>` sin shell ni contraseña, `/opt/<nombre>` de su
+  propiedad y sin acceso para otros, unidad con `User=`, `WorkingDirectory=`,
+  `Restart=on-failure` (tipo simple) y `NoNewPrivileges=yes`, marcada como
+  creada por la aplicación: solo esas se actualizan o desinstalan. Tipo
+  `oneshot` para scripts que terminan (el de fecha y hora). Los botones
+  start/stop/restart/status/enable/disable funcionan sobre cualquier unidad,
+  comprueban el estado resultante y muestran `systemctl status`; no se
+  permite detener ni deshabilitar `ssh`, la red ni servicios básicos.
 - **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
   en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
   `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`

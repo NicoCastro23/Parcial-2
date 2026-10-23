@@ -42,7 +42,7 @@ var nav = []navSection{
 		{"Eliminar usuarios", "/users/delete", true},
 	}},
 	{"Servicios", []navItem{
-		{"Demonios con systemd", "/m/services", false},
+		{"Demonios con systemd", "/services", true},
 		{"Balanceador HAProxy", "/m/haproxy", false},
 	}},
 }
@@ -53,8 +53,7 @@ type pendingModule struct {
 }
 
 var pending = map[string]pendingModule{
-	"services": {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
-	"haproxy":  {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
+	"haproxy": {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
 }
 
 // page es el modelo común de todas las plantillas.
@@ -439,6 +438,71 @@ func nonEmpty(m map[string]string) map[string]string {
 		}
 	}
 	return m
+}
+
+// ---- Demonios con systemd (3.3) ----
+
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Demonios con systemd", "/services")
+	p.Form = map[string]string{"type": ops.SvcSimple, "start": "yes"}
+	s.render(w, "services", p)
+}
+
+func (s *Server) handleServicesRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Demonios con systemd", "/services")
+	p.Form = nonEmpty(formValues(r, "name", "source", "exec", "args", "env", "type", "lowports", "start", "unit", "action"))
+	action := p.Form["action"]
+	unit := p.Form["unit"]
+	switch action {
+	case "deploy":
+		in, err := serviceInput(p.Form)
+		if err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 40*time.Minute, "Servicio "+in.Name+" desplegado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.DeployService(ctx, rn, in)
+		})
+		p.Form["unit"] = in.Name // para gestionarlo enseguida
+	case "list":
+		s.runOp(r, &p, 2*time.Minute, "Servicios listados.", ops.ListServices)
+	case "undeploy":
+		name := strings.TrimSuffix(unit, ".service")
+		s.runOp(r, &p, 5*time.Minute, "Servicio "+name+" desinstalado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.UndeployService(ctx, rn, name)
+		})
+	case "start", "stop", "restart", "status", "enable", "disable":
+		if _, err := validate.UnitName(unit); err != nil {
+			p.FlashErr = "Indique la unidad: " + err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "systemctl "+action+" "+unit+": correcto.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.UnitAction(ctx, rn, unit, action)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "services", p)
+}
+
+// serviceInput arma y valida los datos del formulario de despliegue.
+func serviceInput(f map[string]string) (ops.ServiceInput, error) {
+	in := ops.ServiceInput{
+		Name:     strings.ToLower(f["name"]),
+		Source:   config.ExpandHome(f["source"]),
+		Exec:     strings.TrimPrefix(f["exec"], "./"),
+		Type:     f["type"],
+		LowPorts: f["lowports"] == "yes",
+		Start:    f["start"] == "yes",
+	}
+	var err error
+	if in.Args, err = validate.ExecArgs(f["args"]); err != nil {
+		return in, err
+	}
+	if in.Env, err = validate.EnvVars(f["env"]); err != nil {
+		return in, err
+	}
+	return in, in.Validate()
 }
 
 // ---- Nombre de host y /etc/hosts (3.1.4) ----
