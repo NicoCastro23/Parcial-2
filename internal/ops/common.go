@@ -13,6 +13,9 @@ import (
 type Result struct {
 	Steps []Step
 	OK    bool
+	// Preview es una salida para mostrar tal cual (p. ej. cómo se ve
+	// /etc/issue en la consola). Opcional.
+	Preview string
 }
 
 // opRun agrupa lo que comparten los pasos de una operación: el canal, el

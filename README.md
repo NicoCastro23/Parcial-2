@@ -12,7 +12,7 @@ interactiva.
 | 3 (canales) | Guest Additions antes de SSH · SSH con llaves después | Núcleo hecho. SSH **probado contra un sshd real**; Guest Additions **sin probar con VirtualBox real** (ver "Pendiente de verificar") |
 | 3.1.2 | Llave SSH de root (crear, autorizar, sin contraseña, descargar) | **Hecho y probado** |
 | 3.1.1 | Instalar / eliminar aplicaciones | **Hecho** (pruebas unitarias; falta probar en la VM) |
-| 3.1.3 | Pantalla de entrada `/etc/issue` | Pendiente |
+| 3.1.3 | Pantalla de entrada `/etc/issue` | **Hecho** (pruebas unitarias y con `agetty` real; falta probar en la VM) |
 | 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
 | 3.2.1 / 3.2.2 | Crear / eliminar usuarios | Pendiente |
 | 3.3 | Servicios systemd | Pendiente |
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (llave SSH de root, paquetes, nombre de host)
+internal/ops                 operaciones de automatización (llave SSH de root, paquetes, /etc/issue, nombre de host)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -100,6 +100,14 @@ Decisiones de diseño (útiles para la documentación):
   arrastraría paquetes necesarios para administrar la VM (SSH, sudo, red,
   arranque): por ejemplo, quitar `openssh-client` arrastra `openssh-server`.
   Al final se comprueba con `dpkg-query` que el estado sea el pedido.
+- **Pantalla de entrada (3.1.3):** cada casilla agrega una secuencia de escape
+  de `agetty` (`\n` nombre de host, `\d` fecha, `\t` hora, `\4` IP, `\S`
+  sistema...), así los valores son siempre los actuales. El mensaje no admite
+  `\` para que no se puedan colar secuencias de escape. Tras escribir se
+  comprueba el contenido exacto y se muestra cómo queda en la consola
+  (`agetty --show-issue` dentro de `script`, que le da la terminal que
+  necesita); `agetty --reload` actualiza las consolas abiertas. Copias:
+  `/etc/issue.np2-prev` y `/etc/issue.np2-orig` (botón "Restaurar el original").
 - **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
   en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
   `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`

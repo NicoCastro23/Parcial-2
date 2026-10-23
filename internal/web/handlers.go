@@ -34,7 +34,7 @@ var nav = []navSection{
 	{"Preparación del sistema", []navItem{
 		{"Instalar y eliminar aplicaciones", "/prep/packages", true},
 		{"Llave SSH del usuario root", "/prep/rootkey", true},
-		{"Pantalla de entrada (/etc/issue)", "/m/issue", false},
+		{"Pantalla de entrada (/etc/issue)", "/prep/issue", true},
 		{"Nombre de host y /etc/hosts", "/prep/hostname", true},
 	}},
 	{"Gestión de usuarios", []navItem{
@@ -53,7 +53,6 @@ type pendingModule struct {
 }
 
 var pending = map[string]pendingModule{
-	"issue":        {"Pantalla de entrada (/etc/issue)", "3.1.3", "Establecer /etc/issue con opciones para mostrar nombre de host, fecha, hora y dirección IP, más un mensaje personalizado."},
 	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
 	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
 	"services":     {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
@@ -80,8 +79,9 @@ type page struct {
 	Pending     *pendingModule
 
 	// Módulos que usan ops.Result (resultado por pasos) y un formulario.
-	Op   *ops.Result
-	Form map[string]string
+	Op          *ops.Result
+	Form        map[string]string
+	IssueFields []issueCheckbox
 }
 
 func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
@@ -295,6 +295,72 @@ func (s *Server) handlePackagesRun(w http.ResponseWriter, r *http.Request) {
 		p.FlashErr = "Acción desconocida: use Instalar, Eliminar o Consultar estado."
 	}
 	s.render(w, "packages", p)
+}
+
+// ---- Pantalla de entrada /etc/issue (3.1.3) ----
+
+// issueCheckbox es una casilla de la pantalla de /etc/issue.
+type issueCheckbox struct{ Name, Label, Esc string }
+
+var issueCheckboxes = []issueCheckbox{
+	{"hostname", "Nombre de host", `\n`},
+	{"date", "Fecha", `\d`},
+	{"time", "Hora", `\t`},
+	{"ip", "Dirección IP", `\4`},
+	{"system", "Sistema operativo", `\S{PRETTY_NAME}`},
+	{"kernel", "Núcleo y arquitectura", `\r (\m)`},
+	{"tty", "Terminal", `\l`},
+	{"users", "Usuarios conectados", `\u`},
+}
+
+func (s *Server) issuePage(r *http.Request) page {
+	p, _ := s.newPage(r, "Pantalla de entrada (/etc/issue)", "/prep/issue")
+	p.IssueFields = issueCheckboxes
+	return p
+}
+
+func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
+	p := s.issuePage(r)
+	// Valores iniciales: lo que pide el enunciado.
+	p.Form = map[string]string{"hostname": "yes", "date": "yes", "time": "yes", "ip": "yes", "color": "yes"}
+	s.render(w, "issue", p)
+}
+
+func (s *Server) handleIssueRun(w http.ResponseWriter, r *http.Request) {
+	p := s.issuePage(r)
+	keys := []string{"message", "color", "action"}
+	for _, c := range issueCheckboxes {
+		keys = append(keys, c.Name)
+	}
+	p.Form = formValues(r, keys...)
+	for k, v := range p.Form {
+		if v == "" {
+			delete(p.Form, k) // las casillas sin marcar no deben verse marcadas
+		}
+	}
+	on := func(k string) bool { return p.Form[k] == "yes" }
+	switch p.Form["action"] {
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado actual consultado.", ops.IssueState)
+	case "restore":
+		s.runOp(r, &p, 2*time.Minute, "Se restauró el /etc/issue original.", ops.RestoreIssue)
+	case "apply":
+		in := ops.IssueInput{
+			Message: p.Form["message"], Color: on("color"),
+			Hostname: on("hostname"), Date: on("date"), Time: on("time"), IP: on("ip"),
+			System: on("system"), Kernel: on("kernel"), TTY: on("tty"), Users: on("users"),
+		}
+		if err := in.Validate(); err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 3*time.Minute, "/etc/issue actualizado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.SetIssue(ctx, rn, in)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "issue", p)
 }
 
 // ---- Nombre de host y /etc/hosts (3.1.4) ----

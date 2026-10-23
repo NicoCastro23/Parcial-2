@@ -93,6 +93,7 @@ func TestPagesRender(t *testing.T) {
 		"/prep/rootkey":          "Configurar llave de root",
 		"/prep/hostname":         "Aplicar nombre de host",
 		"/prep/packages":         "Instalar y eliminar aplicaciones",
+		"/prep/issue":            "Aplicar en /etc/issue",
 		"/journal":               "Registro de operaciones",
 		"/m/haproxy":             "Agregar un servidor al backend",
 		"/m/users-create":        "casilla de sudo",
@@ -253,6 +254,40 @@ func TestPackagesForm(t *testing.T) {
 		_, body = post(t, ts, "/prep/packages", with("action", action, "packages", "HTOP, tree", "purge", "yes"))
 		if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, `value="HTOP, tree"`) || !strings.Contains(body, "checked") {
 			t.Errorf("%s: debía intentar conectar y conservar el formulario:\n%s", action, body)
+		}
+	}
+}
+
+func TestIssueForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Por defecto vienen marcadas las casillas que pide el enunciado.
+	_, body := get(t, ts, "/prep/issue?t=test")
+	if strings.Count(body, "checked") != 5 {
+		t.Errorf("casillas marcadas por defecto: %d", strings.Count(body, "checked"))
+	}
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body = post(t, ts, "/prep/issue", form("action", "apply"))
+	if !strings.Contains(body, "escriba un mensaje o marque al menos un dato") {
+		t.Errorf("sin datos debe rechazar:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/issue", form("action", "apply", "message", `hola \e[2J`, "ip", "yes"))
+	if !strings.Contains(body, "no use la barra invertida") {
+		t.Errorf("debía rechazar la barra invertida:\n%s", body)
+	}
+	for _, action := range []string{"apply", "state", "restore"} {
+		_, body = post(t, ts, "/prep/issue", form("action", action, "message", "Hola", "ip", "yes"))
+		if !strings.Contains(body, "no se encuentra la llave privada") {
+			t.Errorf("%s: debía intentar conectar:\n%s", action, body)
+		}
+		// Solo queda marcada la casilla enviada.
+		if strings.Count(body, "checked") != 1 {
+			t.Errorf("%s: casillas marcadas %d, quería 1", action, strings.Count(body, "checked"))
 		}
 	}
 }
