@@ -155,10 +155,17 @@ func (s *Server) runnerFor(t config.Target) (runner.Runner, error) {
 		if t.VMName == "" || t.GuestUser == "" {
 			return nil, fmt.Errorf("el destino %q necesita vm_name y guest_user para usar Guest Additions", t.ID)
 		}
+		if t.GuestPasswordEnv == "" {
+			return nil, fmt.Errorf("el destino %q no tiene guest_password_env: indique el nombre de la variable de entorno con la contraseña de %s", t.ID, t.GuestUser)
+		}
+		pw := os.Getenv(t.GuestPasswordEnv)
+		if pw == "" {
+			return nil, fmt.Errorf("la variable de entorno %s está vacía o no está definida en la terminal donde corre la aplicación: ejecute export %s='contraseña' y reinicie la aplicación", t.GuestPasswordEnv, t.GuestPasswordEnv)
+		}
 		rn = &runner.Guest{
 			VBoxManage: s.cfg.Snapshot().VBoxManage,
 			VM:         t.VMName, User: t.GuestUser,
-			Password: os.Getenv(t.GuestPasswordEnv),
+			Password: pw,
 		}
 	default:
 		return nil, fmt.Errorf("transporte desconocido %q", t.Transport)

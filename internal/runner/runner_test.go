@@ -138,6 +138,9 @@ func TestGuestBuildArgs(t *testing.T) {
 	if strings.Join(a[:3], " ") != "guestcontrol mv1 run" {
 		t.Errorf("args: %v", a)
 	}
+	if strings.Join(a[len(a)-4:len(a)-1], " ") != "env bash -c" {
+		t.Errorf("el comando debe ir como env bash -c <script>: %v", a)
+	}
 	body := a[len(a)-1]
 	if strings.Contains(body, "sudo") || !strings.Contains(body, "echo hi") {
 		t.Errorf("root no debe usar sudo: %q", body)

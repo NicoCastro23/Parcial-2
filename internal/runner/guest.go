@@ -51,12 +51,16 @@ func (g *Guest) BuildArgs(passwordFile, script string) []string {
 	}
 	return []string{
 		"guestcontrol", g.VM, "run",
-		"--exe", "/bin/bash",
+		// Se ejecuta /usr/bin/env y no bash directamente: según la versión de
+		// VirtualBox, lo que va tras "--" incluye o no el argv[0]. Con env un
+		// "env" de más es inofensivo (env env bash -c ... funciona igual), así
+		// que el comando es correcto en ambas variantes.
+		"--exe", "/usr/bin/env",
 		"--username", g.User,
 		"--passwordfile", passwordFile,
 		"--wait-stdout", "--wait-stderr",
 		"--timeout", strconv.Itoa(timeout),
-		"--", "bash", "-c", body,
+		"--", "env", "bash", "-c", body,
 	}
 }
 
