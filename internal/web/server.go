@@ -64,7 +64,7 @@ func New(cfg *config.Store) (*Server, error) {
 		dl:   newDownloadStore(), locks: newLockSet(),
 		tmpl: map[string]*template.Template{},
 	}
-	for _, name := range []string{"connection", "rootkey", "hostname", "packages", "issue", "pending", "journal"} {
+	for _, name := range []string{"connection", "rootkey", "hostname", "packages", "issue", "users-create", "users-delete", "pending", "journal"} {
 		t, err := template.ParseFS(assets, "templates/layout.html", "templates/opresult.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, fmt.Errorf("plantilla %s: %w", name, err)
@@ -90,6 +90,10 @@ func New(cfg *config.Store) (*Server, error) {
 	mux.HandleFunc("POST /prep/packages", s.handlePackagesRun)
 	mux.HandleFunc("GET /prep/issue", s.handleIssue)
 	mux.HandleFunc("POST /prep/issue", s.handleIssueRun)
+	mux.HandleFunc("GET /users/create", s.handleUserCreate)
+	mux.HandleFunc("POST /users/create", s.handleUserCreateRun)
+	mux.HandleFunc("GET /users/delete", s.handleUserDelete)
+	mux.HandleFunc("POST /users/delete", s.handleUserDeleteRun)
 	mux.HandleFunc("GET /prep/hostname", s.handleHostname)
 	mux.HandleFunc("POST /prep/hostname", s.handleHostnameRun)
 	mux.HandleFunc("GET /download/{token}", s.handleDownload)

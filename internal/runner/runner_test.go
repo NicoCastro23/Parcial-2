@@ -199,3 +199,44 @@ func TestJournal(t *testing.T) {
 		t.Errorf("entrada inesperada: %+v", got[0])
 	}
 }
+
+func TestJournalRedactsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	j, err := NewJournal(filepath.Join(dir, "j.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw := "S3cr'eto!"
+	fake := writeFake(t, `echo "eco: $*"`)
+	rn := Journaled{Runner: &SSH{Host: "h", User: "root", KeyPath: "k", Bin: fake}, J: j, Target: "t"}
+	ctx := WithSecret(WithOp(context.Background(), "prueba"), pw)
+	rn.Run(ctx, "printf '%s' "+Quote(pw)+" | chpasswd")
+	raw, _ := os.ReadFile(filepath.Join(dir, "j.jsonl"))
+	if strings.Contains(string(raw), "S3cr") {
+		t.Fatalf("la contraseña quedó en el registro:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "********") {
+		t.Errorf("debía quedar el marcador de contraseña oculta:\n%s", raw)
+	}
+}
+
+func TestSSHNoSudo(t *testing.T) {
+	fake := writeFake(t, `for a in "$@"; do last="$a"; done; echo "$last"`)
+	for _, c := range []struct {
+		s    SSH
+		sudo bool
+	}{
+		{SSH{User: "root"}, false},
+		{SSH{User: "ana"}, true},
+		{SSH{User: "ana", NoSudo: true}, false},
+	} {
+		c.s.Host, c.s.KeyPath, c.s.Bin = "h", "k", fake
+		r, err := c.s.Run(context.Background(), "id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.HasPrefix(r.Stdout, "sudo -n "); got != c.sudo {
+			t.Errorf("%+v: sudo=%v, quería %v (%s)", c.s, got, c.sudo, r.Stdout)
+		}
+	}
+}

@@ -38,8 +38,8 @@ var nav = []navSection{
 		{"Nombre de host y /etc/hosts", "/prep/hostname", true},
 	}},
 	{"Gestión de usuarios", []navItem{
-		{"Crear usuarios", "/m/users-create", false},
-		{"Eliminar usuarios", "/m/users-delete", false},
+		{"Crear usuarios", "/users/create", true},
+		{"Eliminar usuarios", "/users/delete", true},
 	}},
 	{"Servicios", []navItem{
 		{"Demonios con systemd", "/m/services", false},
@@ -53,10 +53,8 @@ type pendingModule struct {
 }
 
 var pending = map[string]pendingModule{
-	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
-	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
-	"services":     {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
-	"haproxy":      {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
+	"services": {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
+	"haproxy":  {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
 }
 
 // page es el modelo común de todas las plantillas.
@@ -82,6 +80,7 @@ type page struct {
 	Op          *ops.Result
 	Form        map[string]string
 	IssueFields []issueCheckbox
+	User        *ops.UserResult
 }
 
 func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
@@ -361,6 +360,85 @@ func (s *Server) handleIssueRun(w http.ResponseWriter, r *http.Request) {
 		p.FlashErr = "Acción desconocida."
 	}
 	s.render(w, "issue", p)
+}
+
+// ---- Usuarios (3.2.1 y 3.2.2) ----
+
+func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Crear usuarios", "/users/create")
+	p.Form = map[string]string{"keys": "yes"}
+	s.render(w, "users-create", p)
+}
+
+func (s *Server) handleUserCreateRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Crear usuarios", "/users/create")
+	p.Form = nonEmpty(formValues(r, "name", "fullname", "sudo", "keys", "action"))
+	if p.Form["action"] == "list" {
+		s.runOp(r, &p, 2*time.Minute, "Usuarios listados.", ops.ListUsers)
+		s.render(w, "users-create", p)
+		return
+	}
+	in := ops.CreateUserInput{
+		Name: strings.ToLower(p.Form["name"]), FullName: p.Form["fullname"],
+		Sudo: p.Form["sudo"] == "yes", Keys: p.Form["keys"] == "yes",
+		Password: r.PostFormValue("password"), // nunca se vuelve a mostrar
+	}
+	if err := in.Validate(); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "users-create", p)
+		return
+	}
+	s.runOp(r, &p, 20*time.Minute, "Usuario "+in.Name+" creado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		p.User = ops.CreateUser(ctx, s.operationEnv(p.Cur, rn), in)
+		return &p.User.Result
+	})
+	if p.User != nil && p.User.KeyPath != "" {
+		p.DownloadURL = "/download/" + s.dl.Add(p.User.KeyPath, p.User.DownloadName, 15*time.Minute)
+	}
+	s.render(w, "users-create", p)
+}
+
+func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Eliminar usuarios", "/users/delete")
+	s.render(w, "users-delete", p)
+}
+
+func (s *Server) handleUserDeleteRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Eliminar usuarios", "/users/delete")
+	p.Form = nonEmpty(formValues(r, "name", "remove_files", "action"))
+	if p.Form["action"] == "list" {
+		s.runOp(r, &p, 2*time.Minute, "Usuarios listados.", ops.ListUsers)
+		s.render(w, "users-delete", p)
+		return
+	}
+	if r.PostFormValue("confirm") != "yes" {
+		p.FlashErr = "Marque la casilla de confirmación para eliminar el usuario."
+		s.render(w, "users-delete", p)
+		return
+	}
+	in := ops.DeleteUserInput{Name: strings.ToLower(p.Form["name"]), RemoveFiles: p.Form["remove_files"] == "yes"}
+	if err := validate.Username(in.Name); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "users-delete", p)
+		return
+	}
+	// No se puede eliminar el usuario con el que la aplicación se conecta.
+	protected := []string{"root", p.Cur.User, p.Cur.GuestUser}
+	s.runOp(r, &p, 5*time.Minute, "Usuario "+in.Name+" eliminado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		return ops.DeleteUser(ctx, rn, in, protected...)
+	})
+	s.render(w, "users-delete", p)
+}
+
+// nonEmpty quita los campos vacíos (las casillas sin marcar no deben verse
+// marcadas al volver a mostrar el formulario).
+func nonEmpty(m map[string]string) map[string]string {
+	for k, v := range m {
+		if v == "" {
+			delete(m, k)
+		}
+	}
+	return m
 }
 
 // ---- Nombre de host y /etc/hosts (3.1.4) ----

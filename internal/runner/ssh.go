@@ -22,6 +22,9 @@ type SSH struct {
 	KnownHosts     string // archivo propio de la aplicación; vacío = el del usuario
 	Bin            string // por defecto "ssh"
 	ConnectTimeout int    // segundos; por defecto 8
+	// NoSudo ejecuta el script como el propio usuario aunque no sea root
+	// (sirve para comprobar el acceso de un usuario recién creado).
+	NoSudo bool
 }
 
 func (s *SSH) Transport() string { return "ssh" }
@@ -79,7 +82,7 @@ func (s *SSH) Run(ctx context.Context, script string) (Result, error) {
 	if bin == "" {
 		bin = "ssh"
 	}
-	cmd := exec.CommandContext(ctx, bin, s.args(remoteCommand(script, s.User != "root"))...)
+	cmd := exec.CommandContext(ctx, bin, s.args(remoteCommand(script, s.User != "root" && !s.NoSudo))...)
 	res, err := execute(cmd)
 	res.Command = s.Describe()
 	res.Script = script

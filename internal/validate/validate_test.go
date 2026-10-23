@@ -184,3 +184,29 @@ func TestDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestFullName(t *testing.T) {
+	for _, ok := range []string{"", "Ana María Pérez", "Juan O'Neil", "Carlos-2"} {
+		if _, err := FullName(ok); err != nil {
+			t.Errorf("%q debería ser válido: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"a:b", "a,b", "a\nb", `a\b`, strings.Repeat("x", 65)} {
+		if _, err := FullName(bad); err == nil {
+			t.Errorf("%q debería ser inválido", bad)
+		}
+	}
+}
+
+func TestPassword(t *testing.T) {
+	for _, ok := range []string{"12345678", "C0ntr4s3ñ@ 'larga' $(id)", strings.Repeat("x", 72)} {
+		if err := Password(ok); err != nil {
+			t.Errorf("%q debería ser válida: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "corta", "con\nsalto", strings.Repeat("x", 73)} {
+		if err := Password(bad); err == nil {
+			t.Errorf("%q debería ser inválida", bad)
+		}
+	}
+}

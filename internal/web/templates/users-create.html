@@ -1,0 +1,50 @@
+{{define "content"}}
+<p class="lead">Crea un usuario en la VM con su directorio personal. Opcionalmente le da privilegios de <code>sudo</code> y le genera un par de llaves: la pública se instala en la VM y la privada se descarga aquí.</p>
+
+<section class="card">
+  <h2>Nuevo usuario en {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <form method="post" action="/users/create" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="name">Nombre de usuario</label>
+    <input id="name" name="name" value="{{index .Form "name"}}" placeholder="ana" maxlength="32" autocomplete="off" spellcheck="false" required pattern="[a-z_][a-z0-9_\-]{0,31}">
+    <small>Minúsculas, dígitos, <code>_</code> o <code>-</code>; empieza con letra o <code>_</code>.</small>
+    <label for="fullname">Nombre completo (opcional)</label>
+    <input id="fullname" name="fullname" value="{{index .Form "fullname"}}" placeholder="Ana Pérez" maxlength="64" autocomplete="off">
+
+    <label class="check"><input type="checkbox" name="sudo" value="yes"{{if index .Form "sudo"}} checked{{end}}>
+      <span><strong>Privilegios de sudo</strong> (grupo <code>sudo</code>)</span></label>
+    <label class="check"><input type="checkbox" name="keys" value="yes" id="keys"{{if index .Form "keys"}} checked{{end}}
+        onchange="document.getElementById('password').disabled = this.checked">
+      <span><strong>Generar par de llaves SSH</strong>: se instala la pública, se descarga la privada y se <strong>deshabilita el acceso con login y contraseña</strong> para este usuario.</span></label>
+
+    <label for="password">Contraseña</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" maxlength="72"{{if index .Form "keys"}} disabled{{end}}>
+    <small>Solo si no genera llaves (8 a 72 caracteres). No se guarda ni aparece en el registro.</small>
+
+    <div class="row">
+      <button type="submit" name="action" value="create" class="primary">Crear usuario</button>
+      <button type="submit" name="action" value="list" formnovalidate>Listar usuarios</button>
+    </div>
+  </form>
+  <p class="note">Con llaves, la contraseña del usuario queda bloqueada y, si tiene sudo, se le permite usarlo sin contraseña (<code>/etc/sudoers.d/np2-&lt;usuario&gt;</code>), porque no tiene una con la que autenticarse. Si algo falla durante la creación, la aplicación elimina el usuario para no dejarlo a medio configurar.</p>
+</section>
+
+{{template "opresult" .}}
+
+{{if .DownloadURL}}
+<section class="card success">
+  <h2>Descargue la llave privada de {{index .Form "name"}}</h2>
+  <p>Huella de la llave: <code>{{.User.Fingerprint}}</code></p>
+  <p><a class="button primary" href="{{.DownloadURL}}" download>Descargar {{.User.DownloadName}}</a>
+     <small>El enlace vence en 15 minutos.</small></p>
+  <h3>Cómo usar correctamente la llave privada</h3>
+  <ul>
+    <li>Es la <strong>credencial de {{index .Form "name"}}</strong>: quien la tenga entra a la VM como ese usuario{{if index .Form "sudo"}} y, con sudo, como administrador{{end}}. Entréguela solo a esa persona, por un medio seguro; no la envíe por correo ni la suba a repositorios.</li>
+    <li>Guárdela en <code>~/.ssh</code> y restrinja los permisos: <code>chmod 600 ~/.ssh/{{.User.DownloadName}}</code>. SSH se niega a usar llaves con permisos abiertos.</li>
+    <li>Conéctese con: <code>ssh -i ~/.ssh/{{.User.DownloadName}} {{index .Form "name"}}@{{.Cur.Host}}</code></li>
+    <li>Si se pierde o se filtra, elimine y vuelva a crear el usuario, o reemplace la línea de la llave en <code>~{{index .Form "name"}}/.ssh/authorized_keys</code>.</li>
+  </ul>
+</section>
+{{end}}
+{{end}}

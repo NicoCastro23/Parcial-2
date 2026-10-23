@@ -96,7 +96,8 @@ func TestPagesRender(t *testing.T) {
 		"/prep/issue":            "Aplicar en /etc/issue",
 		"/journal":               "Registro de operaciones",
 		"/m/haproxy":             "Agregar un servidor al backend",
-		"/m/users-create":        "casilla de sudo",
+		"/users/create":          "Privilegios de sudo",
+		"/users/delete":          "Eliminar también todos sus archivos",
 		"/connection?t=balancer": "VM del balanceador",
 	} {
 		resp, body := get(t, ts, path)
@@ -289,5 +290,48 @@ func TestIssueForm(t *testing.T) {
 		if strings.Count(body, "checked") != 1 {
 			t.Errorf("%s: casillas marcadas %d, quería 1", action, strings.Count(body, "checked"))
 		}
+	}
+}
+
+func TestUserForms(t *testing.T) {
+	srv, ts := newTestServer(t)
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	// Crear: por defecto viene marcada la casilla de llaves y la contraseña deshabilitada.
+	_, body := get(t, ts, "/users/create?t=test")
+	if !strings.Contains(body, `id="keys" checked`) || !strings.Contains(body, `autocomplete="new-password" maxlength="72" disabled`) {
+		t.Errorf("valores por defecto de crear usuario:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "root", "keys", "yes"))
+	if !strings.Contains(body, "cuenta del sistema") {
+		t.Errorf("debía rechazar root:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "ana"))
+	if !strings.Contains(body, "indique una contraseña o marque") {
+		t.Errorf("debía pedir contraseña o llaves:\n%s", body)
+	}
+	// La contraseña nunca se devuelve en la página.
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "ana", "password", "MiClaveSecreta1"))
+	if strings.Contains(body, "MiClaveSecreta1") || !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("la contraseña no debe volver a la página y debía intentar conectar:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "list"))
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("listar debía intentar conectar")
+	}
+
+	// Eliminar: exige confirmación.
+	_, body = post(t, ts, "/users/delete", form("action", "delete", "name", "ana"))
+	if !strings.Contains(body, "Marque la casilla de confirmación") {
+		t.Errorf("debía exigir confirmación:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/delete", form("action", "delete", "name", "ana", "confirm", "yes", "remove_files", "yes"))
+	if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, "checked") {
+		t.Errorf("debía intentar conectar y conservar la casilla:\n%s", body)
 	}
 }

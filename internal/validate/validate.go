@@ -181,3 +181,34 @@ func IssueText(s string) (string, error) {
 	}
 	return s, nil
 }
+
+// FullName valida el nombre completo (campo GECOS de /etc/passwd): opcional,
+// máximo 64 caracteres, sin caracteres de control ni los separadores de
+// /etc/passwd (":" y ",") ni barra invertida.
+func FullName(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if utf8.RuneCountInString(s) > 64 {
+		return "", errors.New("el nombre completo no puede superar los 64 caracteres")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || strings.ContainsRune(`:,=\`, r) {
+			return "", fmt.Errorf("el nombre completo no puede contener %q ni caracteres de control", r)
+		}
+	}
+	return s, nil
+}
+
+// Password valida una contraseña: 8 a 72 caracteres, sin caracteres de
+// control (chpasswd lee una línea por usuario).
+func Password(s string) error {
+	n := utf8.RuneCountInString(s)
+	if n < 8 || n > 72 {
+		return errors.New("la contraseña debe tener entre 8 y 72 caracteres")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return errors.New("la contraseña no puede contener caracteres de control")
+		}
+	}
+	return nil
+}

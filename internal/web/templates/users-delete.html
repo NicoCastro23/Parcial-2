@@ -1,0 +1,23 @@
+{{define "content"}}
+<p class="lead">Elimina un usuario de la VM. Se cierran sus procesos y se retira su permiso de <code>sudo</code> si lo creó esta aplicación. Las cuentas del sistema y el usuario con el que la aplicación se conecta están protegidos.</p>
+
+<section class="card">
+  <h2>Eliminar un usuario de {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <form method="post" action="/users/delete" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="name">Nombre de usuario</label>
+    <input id="name" name="name" value="{{index .Form "name"}}" placeholder="ana" maxlength="32" autocomplete="off" spellcheck="false" required>
+    <label class="check"><input type="checkbox" name="remove_files" value="yes"{{if index .Form "remove_files"}} checked{{end}}>
+      <span><strong>Eliminar también todos sus archivos</strong> (directorio personal y correo, <code>userdel -r</code>)</span></label>
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required>
+      <span>Confirmo que quiero eliminar este usuario. La operación no se puede deshacer.</span></label>
+    <div class="row">
+      <button type="submit" name="action" value="delete" class="danger">Eliminar usuario</button>
+      <button type="submit" name="action" value="list" formnovalidate>Listar usuarios</button>
+    </div>
+  </form>
+</section>
+
+{{template "opresult" .}}
+{{end}}
