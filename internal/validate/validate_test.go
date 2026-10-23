@@ -171,3 +171,81 @@ func TestID(t *testing.T) {
 		}
 	}
 }
+
+func TestDomain(t *testing.T) {
+	for _, ok := range []string{"lab.local", "local", "uq.edu.co", "a-1.b2"} {
+		if err := Domain(ok); err != nil {
+			t.Errorf("%q debería ser válido: %v", ok, err)
+		}
+	}
+	for _, bad := range append([]string{"Lab.local", ".local", "lab..local", "lab.local.", "-a.b", "a_b.c", strings.Repeat("a.", 101) + "a"}, injections...) {
+		if err := Domain(bad); err == nil {
+			t.Errorf("%q debería ser inválido", bad)
+		}
+	}
+}
+
+func TestFullName(t *testing.T) {
+	for _, ok := range []string{"", "Ana María Pérez", "Juan O'Neil", "Carlos-2"} {
+		if _, err := FullName(ok); err != nil {
+			t.Errorf("%q debería ser válido: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"a:b", "a,b", "a\nb", `a\b`, strings.Repeat("x", 65)} {
+		if _, err := FullName(bad); err == nil {
+			t.Errorf("%q debería ser inválido", bad)
+		}
+	}
+}
+
+func TestPassword(t *testing.T) {
+	for _, ok := range []string{"12345678", "C0ntr4s3ñ@ 'larga' $(id)", strings.Repeat("x", 72)} {
+		if err := Password(ok); err != nil {
+			t.Errorf("%q debería ser válida: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "corta", "con\nsalto", strings.Repeat("x", 73)} {
+		if err := Password(bad); err == nil {
+			t.Errorf("%q debería ser inválida", bad)
+		}
+	}
+}
+
+func TestServiceFields(t *testing.T) {
+	for _, ok := range []string{"catalogo", "fecha-hora", "app2"} {
+		if err := ServiceName(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range append([]string{"ssh.service", "Catalogo", "2app", "a", strings.Repeat("a", 29)}, injections...) {
+		if err := ServiceName(bad); err == nil {
+			t.Errorf("servicio %q debería ser inválido", bad)
+		}
+	}
+	for _, ok := range []string{"catalogo", "bin/app", "scripts/fecha.sh", "app-linux_amd64"} {
+		if err := RelPath(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"/bin/sh", "../x", "a/../b", "a//b", "a b", "./app", "a;id", ""} {
+		if err := RelPath(bad); err == nil {
+			t.Errorf("ruta %q debería ser inválida", bad)
+		}
+	}
+	if got, err := ExecArgs("  --port=8080 -addr :9000 "); err != nil || len(got) != 3 {
+		t.Errorf("ExecArgs: %v %v", got, err)
+	}
+	for _, bad := range []string{"$HOME", "%h", "'x'", `"x"`, "a;b", "$(id)", "a|b", `a\b`} {
+		if _, err := ExecArgs(bad); err == nil {
+			t.Errorf("argumento %q debería ser inválido", bad)
+		}
+	}
+	if got, err := EnvVars("PORT=8080 GIN_MODE=release DB=/opt/x/db.sqlite EMPTY="); err != nil || len(got) != 4 {
+		t.Errorf("EnvVars: %v %v", got, err)
+	}
+	for _, bad := range []string{"port=1", "PORT", "A=$B", "A=a b", "A='x'", "1A=x"} {
+		if _, err := EnvVars(bad); err == nil {
+			t.Errorf("variable %q debería ser inválida", bad)
+		}
+	}
+}

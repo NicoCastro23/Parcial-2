@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,9 +21,33 @@ func WithOp(ctx context.Context, op string) context.Context {
 	return context.WithValue(ctx, opKey{}, op)
 }
 
-func opFrom(ctx context.Context) string {
+// OpFrom devuelve la etiqueta puesta con WithOp ("" si no hay).
+func OpFrom(ctx context.Context) string {
 	op, _ := ctx.Value(opKey{}).(string)
 	return op
+}
+
+type secretKey struct{}
+
+// WithSecret marca un valor (p. ej. una contraseña) que nunca debe quedar en
+// el registro: se reemplaza por "********" en el script y en la salida.
+func WithSecret(ctx context.Context, secret string) context.Context {
+	if secret == "" {
+		return ctx
+	}
+	prev, _ := ctx.Value(secretKey{}).([]string)
+	return context.WithValue(ctx, secretKey{}, append(append([]string(nil), prev...), secret))
+}
+
+func redact(ctx context.Context, s string) string {
+	secrets, _ := ctx.Value(secretKey{}).([]string)
+	for _, sec := range secrets {
+		s = strings.ReplaceAll(s, sec, "********")
+		if q := Quote(sec); q != sec {
+			s = strings.ReplaceAll(s, q, "'********'")
+		}
+	}
+	return s
 }
 
 // Entry es una línea del registro de operaciones (JSON Lines).
@@ -112,20 +139,37 @@ type Journaled struct {
 
 func (j Journaled) Run(ctx context.Context, script string) (Result, error) {
 	res, err := j.Runner.Run(ctx, script)
+	j.record(ctx, res, err)
+	return res, err
+}
+
+// RunInput reenvía al canal si sabe transferir datos; si no (Guest
+// Additions), lo informa con un error comprensible.
+func (j Journaled) RunInput(ctx context.Context, script string, in io.Reader) (Result, error) {
+	u, ok := j.Runner.(Uploader)
+	if !ok {
+		err := &Error{Kind: KindExec, Result: Result{Script: script}, Err: errors.New("la transferencia de archivos requiere el canal SSH: configure primero la llave SSH de root")}
+		return err.Result, err
+	}
+	res, err := u.RunInput(ctx, script, in)
+	j.record(ctx, res, err)
+	return res, err
+}
+
+func (j Journaled) record(ctx context.Context, res Result, err error) {
 	e := Entry{
-		Time: res.Started, Target: j.Target, Op: opFrom(ctx),
-		Transport: j.Runner.Transport(), Command: res.Command, Script: res.Script,
+		Time: res.Started, Target: j.Target, Op: OpFrom(ctx),
+		Transport: j.Runner.Transport(), Command: res.Command, Script: redact(ctx, res.Script),
 		ExitCode: res.ExitCode, DurationMs: res.Duration.Milliseconds(),
-		Stdout: res.Stdout, Stderr: res.Stderr,
+		Stdout: redact(ctx, res.Stdout), Stderr: redact(ctx, res.Stderr),
 	}
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
 	if err != nil {
-		e.Error = err.Error()
+		e.Error = redact(ctx, err.Error())
 	}
 	if j.J != nil {
 		j.J.Append(e)
 	}
-	return res, err
 }

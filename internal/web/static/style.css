@@ -33,8 +33,6 @@ code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
 .side a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none; }
 .side a:hover { background: var(--code-bg); }
 .side a[aria-current="page"] { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.todo { font-size: .72em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
-.side a[aria-current="page"] .todo { color: inherit; border-color: currentColor; }
 
 main { padding: 24px clamp(16px, 4vw, 40px); max-width: 980px; }
 h1 { margin: 0 0 14px; font-size: 1.5rem; }
@@ -93,3 +91,22 @@ pre.out { background: var(--out-bg); color: var(--out-text); padding: 12px 14px;
   .shell { grid-template-columns: 1fr; }
   .side { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+.form { display: grid; gap: 6px; max-width: 640px; }
+.form label { font-weight: 600; margin-top: 8px; }
+.form small { color: var(--muted); }
+.form .row { margin-top: 12px; gap: 10px; }
+input[type="text"], input[type="password"], input:not([type]) { font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); width: 100%; }
+.danger { color: var(--err); border-color: var(--err); font-weight: 600; }
+.danger:hover { background: var(--err-bg); border-color: var(--err); }
+.form .check { margin: 10px 0 0; font-weight: 400; }
+fieldset.checks { border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px 10px; margin: 12px 0 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 16px; }
+fieldset.checks legend { font-weight: 600; padding: 0 6px; }
+fieldset.checks .check { margin: 8px 0 0; }
+pre.console { font-size: 1em; line-height: 1.4; }
+input:disabled { opacity: .55; cursor: not-allowed; }
+.row.actions button { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-width: 84px; }
+details.adv { margin-top: 10px; display: grid; gap: 6px; }
+details.adv[open] { border-left: 3px solid var(--line); padding-left: 12px; }
+details.adv > summary { font-weight: 600; color: var(--text); }

@@ -11,12 +11,12 @@ interactiva.
 |---|---|---|
 | 3 (canales) | Guest Additions antes de SSH · SSH con llaves después | Núcleo hecho. SSH **probado contra un sshd real**; Guest Additions **sin probar con VirtualBox real** (ver "Pendiente de verificar") |
 | 3.1.2 | Llave SSH de root (crear, autorizar, sin contraseña, descargar) | **Hecho y probado** |
-| 3.1.1 | Instalar / eliminar aplicaciones | Pendiente |
-| 3.1.3 | Pantalla de entrada `/etc/issue` | Pendiente |
-| 3.1.4 | Nombre de host y `/etc/hosts` | Pendiente |
-| 3.2.1 / 3.2.2 | Crear / eliminar usuarios | Pendiente |
-| 3.3 | Servicios systemd | Pendiente |
-| 3.4 | HAProxy: agregar / quitar servidor del backend | Pendiente |
+| 3.1.1 | Instalar / eliminar aplicaciones | **Hecho** (pruebas unitarias; falta probar en la VM) |
+| 3.1.3 | Pantalla de entrada `/etc/issue` | **Hecho** (pruebas unitarias y con `agetty` real; falta probar en la VM) |
+| 3.1.4 | Nombre de host y `/etc/hosts` | **Hecho** (pruebas unitarias; falta probar en la VM) |
+| 3.2.1 / 3.2.2 | Crear / eliminar usuarios | **Hecho** (pruebas unitarias; falta probar en la VM) |
+| 3.3 | Servicios systemd | **Hecho** (pruebas unitarias; unidad validada con `systemd-analyze`; falta probar en la VM) |
+| 3.4 | HAProxy: agregar / quitar servidor del backend | **Hecho** (pruebas unitarias y de punta a punta con HAProxy real; falta probar en la VM) |
 
 ## Ejecutar
 
@@ -62,7 +62,7 @@ main.go                      arranque
 internal/config              config.json (guardado atómico, permisos 0600)
 internal/validate            listas blancas para toda entrada del usuario (con pruebas de inyección)
 internal/runner              Runner: SSH (llaves) y Guest (VBoxManage guestcontrol) + registro JSONL
-internal/ops                 operaciones de automatización (hoy: llave SSH de root)
+internal/ops                 operaciones de automatización (una por módulo del enunciado)
 internal/web                 servidor, plantillas y estilos (embebidos en el binario)
 ```
 
@@ -93,6 +93,61 @@ Decisiones de diseño (útiles para la documentación):
   que termina sola. Solo una operación a la vez por VM.
 - **Protección de la propia consola** (ejecuta comandos como root): escucha en
   `127.0.0.1`, rechaza `Host` ajenos (DNS rebinding) y exige token CSRF en todo POST.
+- **Paquetes (3.1.1):** `apt-get` no interactivo (`DEBIAN_FRONTEND=noninteractive`,
+  `--force-confold`, espera el bloqueo de apt hasta 3 min). Antes de instalar se
+  comprueba que el paquete exista (mensaje claro en vez del error de apt). Antes
+  de eliminar se **simula** (`apt-get -s`) y se cancela si la eliminación
+  arrastraría paquetes necesarios para administrar la VM (SSH, sudo, red,
+  arranque): por ejemplo, quitar `openssh-client` arrastra `openssh-server`.
+  Al final se comprueba con `dpkg-query` que el estado sea el pedido.
+- **Pantalla de entrada (3.1.3):** cada casilla agrega una secuencia de escape
+  de `agetty` (`\n` nombre de host, `\d` fecha, `\t` hora, `\4` IP, `\S`
+  sistema...), así los valores son siempre los actuales. El mensaje no admite
+  `\` para que no se puedan colar secuencias de escape. Tras escribir se
+  comprueba el contenido exacto y se muestra cómo queda en la consola
+  (`agetty --show-issue` dentro de `script`, que le da la terminal que
+  necesita); `agetty --reload` actualiza las consolas abiertas. Copias:
+  `/etc/issue.np2-prev` y `/etc/issue.np2-orig` (botón "Restaurar el original").
+- **Usuarios (3.2):** `useradd -m -U -s /bin/bash`. Con la casilla de llaves,
+  el par se genera en este equipo (la privada no viaja a la VM), la pública
+  va a `~usuario/.ssh/authorized_keys` y la contraseña queda **bloqueada**
+  (`passwd -l`): así el usuario no puede entrar con login y contraseña ni por
+  SSH ni en consola. Como no tiene contraseña, si además tiene sudo se le da
+  `NOPASSWD` en `/etc/sudoers.d/np2-<usuario>` (validado con `visudo -cf`).
+  Al final se inicia sesión por SSH **como el usuario nuevo** con su llave
+  (y se prueba `sudo -n`). Sin llaves se pide contraseña (`chpasswd`), que se
+  oculta en el registro de operaciones. Si algo falla a mitad de camino, el
+  usuario se elimina para no dejarlo a medio configurar. Al eliminar se
+  protegen las cuentas del sistema (UID < 1000) y el usuario con el que la
+  aplicación se conecta; se terminan sus procesos antes de `userdel [-r]`.
+- **Servicios systemd (3.3):** los archivos se toman de una ruta en el equipo
+  donde corre la consola (carpeta o archivo; sin límite del navegador y
+  conservando la estructura de carpetas) y viajan como `tar.gz` por la
+  entrada estándar de la misma conexión SSH, sin archivos temporales. Antes de
+  transferir se revisa que el ejecutable sea ELF o un script con `#!` (un
+  binario de macOS daría "Exec format error" en la VM). En la VM: usuario de
+  sistema `svc-<nombre>` sin shell ni contraseña, `/opt/<nombre>` de su
+  propiedad y sin acceso para otros, unidad con `User=`, `WorkingDirectory=`,
+  `Restart=on-failure` (tipo simple) y `NoNewPrivileges=yes`, marcada como
+  creada por la aplicación: solo esas se actualizan o desinstalan. Tipo
+  `oneshot` para scripts que terminan (el de fecha y hora). Los botones
+  start/stop/restart/status/enable/disable funcionan sobre cualquier unidad,
+  comprueban el estado resultante y muestran `systemctl status`; no se
+  permite detener ni deshabilitar `ssh`, la red ni servicios básicos.
+- **HAProxy (3.4):** la aplicación solo edita su propio bloque de
+  `haproxy.cfg`, entre marcas (`frontend np2_balanceador`, `backend
+  np2_servidores`, y estadísticas en `127.0.0.1:8404`); el resto del archivo
+  queda igual. El cambio se arma en Go, se valida con `haproxy -c` sobre un
+  archivo temporal, se instala con copia (`haproxy.cfg.np2-prev`) y se
+  recarga; si HAProxy no queda activo se restaura la copia. Se comprueba que
+  el archivo no haya cambiado entre la lectura y la escritura (sha256). Cada
+  respuesta lleva la cabecera `X-Servidor` con el servidor que la atendió, y
+  "Probar el balanceo" hace peticiones desde la VM para mostrar el reparto.
+  El estado de cada servidor (UP/DOWN) se lee de las estadísticas en CSV.
+- **Nombre de host (3.1.4):** `hostnamectl set-hostname` (con respaldo manual
+  en `/etc/hostname` si no está disponible) y una sola línea `127.0.1.1` en
+  `/etc/hosts`, que es la convención de Debian. Se guarda `/etc/hosts.np2-prev`
+  y la pantalla muestra el estado antes y después, útil para los videos.
 - **Registro de operaciones** (`data/logs/operaciones.jsonl`, también en la
   pantalla "Registro"): qué se ejecutó, dónde, qué respondió y cuánto tardó.
   Es la información técnica para diagnóstico y para las evidencias de prueba.

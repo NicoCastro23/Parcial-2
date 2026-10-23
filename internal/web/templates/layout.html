@@ -23,7 +23,7 @@
     <h2>{{.Title}}</h2>
     <ul>
       {{range .Items}}
-      <li><a href="{{.Path}}?t={{$.Cur.ID}}"{{if eq .Path $.Active}} aria-current="page"{{end}}>{{.Title}}{{if not .Done}} <small class="todo">pendiente</small>{{end}}</a></li>
+      <li><a href="{{.Path}}?t={{$.Cur.ID}}"{{if eq .Path $.Active}} aria-current="page"{{end}}>{{.Title}}</a></li>
       {{end}}
     </ul>
     {{end}}

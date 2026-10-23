@@ -2,20 +2,23 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"np2auto/internal/config"
 	"np2auto/internal/ops"
 	"np2auto/internal/runner"
+	"np2auto/internal/validate"
 )
 
 // navItem y navSection arman el menú lateral.
 type navItem struct {
 	Title string
 	Path  string
-	Done  bool // el módulo ya está implementado
 }
 
 type navSection struct {
@@ -25,38 +28,23 @@ type navSection struct {
 
 var nav = []navSection{
 	{"General", []navItem{
-		{"Conexión con las VMs", "/connection", true},
-		{"Registro de operaciones", "/journal", true},
+		{"Conexión con las VMs", "/connection"},
+		{"Registro de operaciones", "/journal"},
 	}},
 	{"Preparación del sistema", []navItem{
-		{"Instalar y eliminar aplicaciones", "/m/packages", false},
-		{"Llave SSH del usuario root", "/prep/rootkey", true},
-		{"Pantalla de entrada (/etc/issue)", "/m/issue", false},
-		{"Nombre de host y /etc/hosts", "/m/hostname", false},
+		{"Instalar y eliminar aplicaciones", "/prep/packages"},
+		{"Llave SSH del usuario root", "/prep/rootkey"},
+		{"Pantalla de entrada (/etc/issue)", "/prep/issue"},
+		{"Nombre de host y /etc/hosts", "/prep/hostname"},
 	}},
 	{"Gestión de usuarios", []navItem{
-		{"Crear usuarios", "/m/users-create", false},
-		{"Eliminar usuarios", "/m/users-delete", false},
+		{"Crear usuarios", "/users/create"},
+		{"Eliminar usuarios", "/users/delete"},
 	}},
 	{"Servicios", []navItem{
-		{"Demonios con systemd", "/m/services", false},
-		{"Balanceador HAProxy", "/m/haproxy", false},
+		{"Demonios con systemd", "/services"},
+		{"Balanceador HAProxy", "/haproxy"},
 	}},
-}
-
-// pendingModule describe lo que exige el enunciado de un módulo aún no hecho.
-type pendingModule struct {
-	Title, Ref, Summary string
-}
-
-var pending = map[string]pendingModule{
-	"packages":     {"Instalar y eliminar aplicaciones", "3.1.1", "Formulario para indicar la aplicación; botones Instalar y Eliminar; el resultado se informa en la aplicación."},
-	"issue":        {"Pantalla de entrada (/etc/issue)", "3.1.3", "Establecer /etc/issue con opciones para mostrar nombre de host, fecha, hora y dirección IP, más un mensaje personalizado."},
-	"hostname":     {"Nombre de host y /etc/hosts", "3.1.4", "Establecer el nombre de host del sistema y actualizar /etc/hosts para que lo incluya."},
-	"users-create": {"Crear usuarios", "3.2.1", "Crear un usuario con casilla de sudo y casilla para generar llaves (instalar la pública, descargar la privada y deshabilitar login con contraseña)."},
-	"users-delete": {"Eliminar usuarios", "3.2.2", "Eliminar un usuario, con casilla para borrar también todos sus archivos."},
-	"services":     {"Demonios con systemd", "3.3", "Configurar una aplicación como servicio (transferir archivos, permisos) con botones start, stop, restart, status, enable y disable."},
-	"haproxy":      {"Balanceador HAProxy", "3.4", "Agregar un servidor al backend del balanceador y eliminarlo."},
 }
 
 // page es el modelo común de todas las plantillas.
@@ -76,7 +64,13 @@ type page struct {
 	Root        *ops.RootKeyResult
 	DownloadURL string
 	Entries     []runner.Entry
-	Pending     *pendingModule
+
+	// Módulos que usan ops.Result (resultado por pasos) y un formulario.
+	Op          *ops.Result
+	Form        map[string]string
+	IssueFields []issueCheckbox
+	User        *ops.UserResult
+	Algorithms  [][2]string
 }
 
 func (s *Server) newPage(r *http.Request, title, active string) (page, bool) {
@@ -218,6 +212,388 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// ---- Operaciones por pasos (módulos 3.1.1, 3.1.3, 3.1.4, 3.2, 3.3, 3.4) ----
+
+// runOp ejecuta una operación sobre la VM elegida con las mismas reglas para
+// todos los módulos: una operación a la vez por VM, el canal actual (Guest
+// Additions o SSH) y un límite de tiempo propio. Deja el resultado en p.Op y
+// el mensaje general en p.Flash o p.FlashErr.
+func (s *Server) runOp(r *http.Request, p *page, timeout time.Duration, okMsg string, fn func(ctx context.Context, rn runner.Runner) *ops.Result) {
+	unlock, ok := s.locks.try(p.Cur.ID)
+	if !ok {
+		p.FlashErr = "Ya hay una operación en curso sobre esta VM. Espere a que termine."
+		return
+	}
+	defer unlock()
+	rn, err := s.runnerFor(p.Cur)
+	if err != nil {
+		p.FlashErr = err.Error()
+		return
+	}
+	ctx, cancel := opContext(r, timeout)
+	defer cancel()
+	p.Op = fn(ctx, rn)
+	if p.Op.OK {
+		p.Flash = okMsg
+	} else {
+		p.FlashErr = "La operación no se completó. Revise el paso marcado con ✗; su detalle técnico queda también en el Registro de operaciones."
+	}
+}
+
+// formValues copia los campos indicados del formulario para volver a
+// mostrarlos en la página.
+func formValues(r *http.Request, keys ...string) map[string]string {
+	m := make(map[string]string, len(keys))
+	for _, k := range keys {
+		m[k] = strings.TrimSpace(r.PostFormValue(k))
+	}
+	return m
+}
+
+// ---- Instalar y eliminar aplicaciones (3.1.1) ----
+
+func (s *Server) handlePackages(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Instalar y eliminar aplicaciones", "/prep/packages")
+	s.render(w, "packages", p)
+}
+
+func (s *Server) handlePackagesRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Instalar y eliminar aplicaciones", "/prep/packages")
+	p.Form = formValues(r, "packages", "purge", "action")
+	pkgs, err := validate.PackageList(strings.ToLower(p.Form["packages"]))
+	if err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "packages", p)
+		return
+	}
+	switch action := p.Form["action"]; action {
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado consultado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.PackagesState(ctx, rn, pkgs)
+		})
+	case ops.PkgInstall, ops.PkgRemove:
+		in := ops.PackagesInput{Action: action, Packages: pkgs, Purge: p.Form["purge"] == "yes"}
+		msg := "Instalación completada: " + strings.Join(pkgs, ", ") + "."
+		if action == ops.PkgRemove {
+			msg = "Eliminación completada: " + strings.Join(pkgs, ", ") + "."
+		}
+		s.runOp(r, &p, 30*time.Minute, msg, func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.ManagePackages(ctx, rn, in)
+		})
+	default:
+		p.FlashErr = "Acción desconocida: use Instalar, Eliminar o Consultar estado."
+	}
+	s.render(w, "packages", p)
+}
+
+// ---- Pantalla de entrada /etc/issue (3.1.3) ----
+
+// issueCheckbox es una casilla de la pantalla de /etc/issue.
+type issueCheckbox struct{ Name, Label, Esc string }
+
+var issueCheckboxes = []issueCheckbox{
+	{"hostname", "Nombre de host", `\n`},
+	{"date", "Fecha", `\d`},
+	{"time", "Hora", `\t`},
+	{"ip", "Dirección IP", `\4`},
+	{"system", "Sistema operativo", `\S{PRETTY_NAME}`},
+	{"kernel", "Núcleo y arquitectura", `\r (\m)`},
+	{"tty", "Terminal", `\l`},
+	{"users", "Usuarios conectados", `\u`},
+}
+
+func (s *Server) issuePage(r *http.Request) page {
+	p, _ := s.newPage(r, "Pantalla de entrada (/etc/issue)", "/prep/issue")
+	p.IssueFields = issueCheckboxes
+	return p
+}
+
+func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
+	p := s.issuePage(r)
+	// Valores iniciales: lo que pide el enunciado.
+	p.Form = map[string]string{"hostname": "yes", "date": "yes", "time": "yes", "ip": "yes", "color": "yes"}
+	s.render(w, "issue", p)
+}
+
+func (s *Server) handleIssueRun(w http.ResponseWriter, r *http.Request) {
+	p := s.issuePage(r)
+	keys := []string{"message", "color", "action"}
+	for _, c := range issueCheckboxes {
+		keys = append(keys, c.Name)
+	}
+	p.Form = formValues(r, keys...)
+	for k, v := range p.Form {
+		if v == "" {
+			delete(p.Form, k) // las casillas sin marcar no deben verse marcadas
+		}
+	}
+	on := func(k string) bool { return p.Form[k] == "yes" }
+	switch p.Form["action"] {
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado actual consultado.", ops.IssueState)
+	case "restore":
+		s.runOp(r, &p, 2*time.Minute, "Se restauró el /etc/issue original.", ops.RestoreIssue)
+	case "apply":
+		in := ops.IssueInput{
+			Message: p.Form["message"], Color: on("color"),
+			Hostname: on("hostname"), Date: on("date"), Time: on("time"), IP: on("ip"),
+			System: on("system"), Kernel: on("kernel"), TTY: on("tty"), Users: on("users"),
+		}
+		if err := in.Validate(); err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 3*time.Minute, "/etc/issue actualizado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.SetIssue(ctx, rn, in)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "issue", p)
+}
+
+// ---- Usuarios (3.2.1 y 3.2.2) ----
+
+func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Crear usuarios", "/users/create")
+	p.Form = map[string]string{"keys": "yes"}
+	s.render(w, "users-create", p)
+}
+
+func (s *Server) handleUserCreateRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Crear usuarios", "/users/create")
+	p.Form = nonEmpty(formValues(r, "name", "fullname", "sudo", "keys", "action"))
+	if p.Form["action"] == "list" {
+		s.runOp(r, &p, 2*time.Minute, "Usuarios listados.", ops.ListUsers)
+		s.render(w, "users-create", p)
+		return
+	}
+	in := ops.CreateUserInput{
+		Name: strings.ToLower(p.Form["name"]), FullName: p.Form["fullname"],
+		Sudo: p.Form["sudo"] == "yes", Keys: p.Form["keys"] == "yes",
+		Password: r.PostFormValue("password"), // nunca se vuelve a mostrar
+	}
+	if err := in.Validate(); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "users-create", p)
+		return
+	}
+	s.runOp(r, &p, 20*time.Minute, "Usuario "+in.Name+" creado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		p.User = ops.CreateUser(ctx, s.operationEnv(p.Cur, rn), in)
+		return &p.User.Result
+	})
+	if p.User != nil && p.User.KeyPath != "" {
+		p.DownloadURL = "/download/" + s.dl.Add(p.User.KeyPath, p.User.DownloadName, 15*time.Minute)
+	}
+	s.render(w, "users-create", p)
+}
+
+func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Eliminar usuarios", "/users/delete")
+	s.render(w, "users-delete", p)
+}
+
+func (s *Server) handleUserDeleteRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Eliminar usuarios", "/users/delete")
+	p.Form = nonEmpty(formValues(r, "name", "remove_files", "action"))
+	if p.Form["action"] == "list" {
+		s.runOp(r, &p, 2*time.Minute, "Usuarios listados.", ops.ListUsers)
+		s.render(w, "users-delete", p)
+		return
+	}
+	if r.PostFormValue("confirm") != "yes" {
+		p.FlashErr = "Marque la casilla de confirmación para eliminar el usuario."
+		s.render(w, "users-delete", p)
+		return
+	}
+	in := ops.DeleteUserInput{Name: strings.ToLower(p.Form["name"]), RemoveFiles: p.Form["remove_files"] == "yes"}
+	if err := validate.Username(in.Name); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "users-delete", p)
+		return
+	}
+	// No se puede eliminar el usuario con el que la aplicación se conecta.
+	protected := []string{"root", p.Cur.User, p.Cur.GuestUser}
+	s.runOp(r, &p, 5*time.Minute, "Usuario "+in.Name+" eliminado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		return ops.DeleteUser(ctx, rn, in, protected...)
+	})
+	s.render(w, "users-delete", p)
+}
+
+// nonEmpty quita los campos vacíos (las casillas sin marcar no deben verse
+// marcadas al volver a mostrar el formulario).
+func nonEmpty(m map[string]string) map[string]string {
+	for k, v := range m {
+		if v == "" {
+			delete(m, k)
+		}
+	}
+	return m
+}
+
+// ---- Demonios con systemd (3.3) ----
+
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Demonios con systemd", "/services")
+	p.Form = map[string]string{"type": ops.SvcSimple, "start": "yes"}
+	s.render(w, "services", p)
+}
+
+func (s *Server) handleServicesRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Demonios con systemd", "/services")
+	p.Form = nonEmpty(formValues(r, "name", "source", "exec", "args", "env", "type", "lowports", "start", "unit", "action"))
+	action := p.Form["action"]
+	unit := p.Form["unit"]
+	switch action {
+	case "deploy":
+		in, err := serviceInput(p.Form)
+		if err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 40*time.Minute, "Servicio "+in.Name+" desplegado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.DeployService(ctx, rn, in)
+		})
+		p.Form["unit"] = in.Name // para gestionarlo enseguida
+	case "list":
+		s.runOp(r, &p, 2*time.Minute, "Servicios listados.", ops.ListServices)
+	case "undeploy":
+		name := strings.TrimSuffix(unit, ".service")
+		s.runOp(r, &p, 5*time.Minute, "Servicio "+name+" desinstalado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.UndeployService(ctx, rn, name)
+		})
+	case "start", "stop", "restart", "status", "enable", "disable":
+		if _, err := validate.UnitName(unit); err != nil {
+			p.FlashErr = "Indique la unidad: " + err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "systemctl "+action+" "+unit+": correcto.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.UnitAction(ctx, rn, unit, action)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "services", p)
+}
+
+// serviceInput arma y valida los datos del formulario de despliegue.
+func serviceInput(f map[string]string) (ops.ServiceInput, error) {
+	in := ops.ServiceInput{
+		Name:     strings.ToLower(f["name"]),
+		Source:   config.ExpandHome(f["source"]),
+		Exec:     strings.TrimPrefix(f["exec"], "./"),
+		Type:     f["type"],
+		LowPorts: f["lowports"] == "yes",
+		Start:    f["start"] == "yes",
+	}
+	var err error
+	if in.Args, err = validate.ExecArgs(f["args"]); err != nil {
+		return in, err
+	}
+	if in.Env, err = validate.EnvVars(f["env"]); err != nil {
+		return in, err
+	}
+	return in, in.Validate()
+}
+
+// ---- Balanceador HAProxy (3.4) ----
+
+func (s *Server) haproxyPage(r *http.Request) page {
+	// Sin VM elegida, se propone la del balanceador.
+	if r.FormValue("t") == "" {
+		if _, ok := s.cfg.Target("balancer"); ok {
+			q := r.URL.Query()
+			q.Set("t", "balancer")
+			r.URL.RawQuery = q.Encode()
+			r.Form = nil
+		}
+	}
+	p, _ := s.newPage(r, "Balanceador HAProxy", "/haproxy")
+	p.Algorithms = ops.LBAlgorithms()
+	return p
+}
+
+func (s *Server) handleHAProxy(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "haproxy", s.haproxyPage(r))
+}
+
+func (s *Server) handleHAProxyRun(w http.ResponseWriter, r *http.Request) {
+	p := s.haproxyPage(r)
+	p.Form = nonEmpty(formValues(r, "name", "addr", "port", "frontport", "balance", "rname", "action"))
+	switch p.Form["action"] {
+	case "add":
+		in, err := lbAddInput(p.Form)
+		if err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "Servidor "+in.Name+" agregado al backend.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.AddServer(ctx, rn, in)
+		})
+	case "remove":
+		name := p.Form["rname"]
+		if err := validate.ServerName(name); err != nil {
+			p.FlashErr = err.Error()
+			break
+		}
+		s.runOp(r, &p, 5*time.Minute, "Servidor "+name+" eliminado del backend.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.RemoveServer(ctx, rn, name)
+		})
+	case "state":
+		s.runOp(r, &p, 2*time.Minute, "Estado consultado.", ops.LBState)
+	case "test":
+		s.runOp(r, &p, 3*time.Minute, "Prueba de balanceo completada.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.TestBalancer(ctx, rn, 6)
+		})
+	default:
+		p.FlashErr = "Acción desconocida."
+	}
+	s.render(w, "haproxy", p)
+}
+
+func lbAddInput(f map[string]string) (ops.LBAddInput, error) {
+	in := ops.LBAddInput{Name: f["name"], Addr: strings.ToLower(f["addr"]), Balance: f["balance"]}
+	var err error
+	if in.Port, err = validate.Port(f["port"]); err != nil {
+		return in, fmt.Errorf("puerto del servidor: %w", err)
+	}
+	if f["frontport"] != "" {
+		if in.FrontPort, err = validate.Port(f["frontport"]); err != nil {
+			return in, fmt.Errorf("puerto del balanceador: %w", err)
+		}
+	}
+	return in, in.Validate()
+}
+
+// ---- Nombre de host y /etc/hosts (3.1.4) ----
+
+func (s *Server) handleHostname(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Nombre de host y /etc/hosts", "/prep/hostname")
+	s.render(w, "hostname", p)
+}
+
+func (s *Server) handleHostnameRun(w http.ResponseWriter, r *http.Request) {
+	p, _ := s.newPage(r, "Nombre de host y /etc/hosts", "/prep/hostname")
+	p.Form = formValues(r, "name", "domain", "action")
+	if p.Form["action"] == "state" {
+		s.runOp(r, &p, 2*time.Minute, "Estado actual consultado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+			return ops.HostnameState(ctx, rn)
+		})
+		s.render(w, "hostname", p)
+		return
+	}
+	in := ops.HostnameInput{Name: strings.ToLower(p.Form["name"]), Domain: strings.ToLower(p.Form["domain"])}
+	if err := in.Validate(); err != nil {
+		p.FlashErr = err.Error()
+		s.render(w, "hostname", p)
+		return
+	}
+	s.runOp(r, &p, 5*time.Minute, "Nombre de host asignado y /etc/hosts actualizado.", func(ctx context.Context, rn runner.Runner) *ops.Result {
+		return ops.SetHostname(ctx, rn, in)
+	})
+	s.render(w, "hostname", p)
+}
+
 // ---- Registro y módulos pendientes ----
 
 func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
@@ -228,15 +604,4 @@ func (s *Server) handleJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	p.Entries = entries
 	s.render(w, "journal", p)
-}
-
-func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
-	m, ok := pending[r.PathValue("slug")]
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	p, _ := s.newPage(r, m.Title, "/m/"+r.PathValue("slug"))
-	p.Pending = &m
-	s.render(w, "pending", p)
 }

@@ -1,0 +1,57 @@
+{{define "content"}}
+<p class="lead">Agrega o quita servidores del backend del balanceador de carga HAProxy de la VM elegida. La aplicación gestiona solo su propio bloque en <code>/etc/haproxy/haproxy.cfg</code> (frontend, backend y estadísticas); el resto del archivo no se toca. Cada cambio se valida con <code>haproxy -c</code> antes de aplicarse y se revierte si HAProxy no queda activo.</p>
+{{if not (eq .Cur.ID "balancer")}}<div class="msg err" role="note">Está trabajando sobre <strong>{{.Cur.Label}}</strong>. Si el balanceador es otra VM, elíjala arriba en «VM destino».</div>{{end}}
+
+<section class="card">
+  <h2>Agregar un servidor al backend</h2>
+  <form method="post" action="/haproxy" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="name">Nombre del servidor</label>
+    <input id="name" name="name" value="{{index .Form "name"}}" placeholder="web1" maxlength="32" autocomplete="off" spellcheck="false">
+    <label for="addr">Dirección IP del servidor</label>
+    <input id="addr" name="addr" value="{{index .Form "addr"}}" placeholder="192.168.1.70" autocomplete="off" spellcheck="false">
+    <label for="port">Puerto del servidor</label>
+    <input id="port" name="port" value="{{index .Form "port"}}" placeholder="8080" inputmode="numeric" autocomplete="off">
+    <details class="adv"{{if or (index .Form "frontport") (index .Form "balance")}} open{{end}}>
+      <summary>Opciones del balanceador</summary>
+      <label for="frontport">Puerto en el que escucha el balanceador</label>
+      <input id="frontport" name="frontport" value="{{index .Form "frontport"}}" placeholder="80 (sin cambios si se deja vacío)" inputmode="numeric" autocomplete="off">
+      <label for="balance">Algoritmo de balanceo</label>
+      <select id="balance" name="balance">
+        <option value="">sin cambios (la primera vez: por turnos)</option>
+        {{range .Algorithms}}<option value="{{index . 0}}"{{if eq (index $.Form "balance") (index . 0)}} selected{{end}}>{{index . 1}}</option>{{end}}
+      </select>
+    </details>
+    <div class="row">
+      <button type="submit" name="action" value="add" class="primary">Agregar servidor</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Eliminar un servidor del backend</h2>
+  <form method="post" action="/haproxy" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="rname">Nombre del servidor</label>
+    <input id="rname" name="rname" value="{{index .Form "rname"}}" placeholder="web1" maxlength="32" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <button type="submit" name="action" value="remove" class="danger">Eliminar servidor</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Estado y prueba</h2>
+  <form method="post" action="/haproxy" class="row">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <button type="submit" name="action" value="state">Consultar estado</button>
+    <button type="submit" name="action" value="test">Probar el balanceo (6 peticiones)</button>
+  </form>
+  <p class="note">«Probar el balanceo» hace peticiones HTTP al balanceador desde la VM y muestra qué servidor atendió cada una (cabecera <code>X-Servidor</code>). También puede abrir <code>http://{{.Cur.Host}}/</code> en el navegador y recargar varias veces. Un servidor que no responde aparece como <strong>DOWN</strong> y no recibe tráfico.</p>
+</section>
+
+{{template "opresult" .}}
+{{end}}

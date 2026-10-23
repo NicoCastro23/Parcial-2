@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -34,6 +35,13 @@ type Runner interface {
 	// Run ejecuta el script. Devuelve un *Error si algo falla, incluido un
 	// código de salida distinto de cero; el Result siempre viene completo.
 	Run(ctx context.Context, script string) (Result, error)
+}
+
+// Uploader lo implementan los canales que pueden enviar datos al script por
+// la entrada estándar (hoy solo SSH: la transferencia de archivos ocurre
+// cuando la VM ya se administra por SSH).
+type Uploader interface {
+	RunInput(ctx context.Context, script string, in io.Reader) (Result, error)
 }
 
 // Result es la evidencia técnica de una ejecución.

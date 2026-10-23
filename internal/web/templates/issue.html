@@ -1,0 +1,31 @@
+{{define "content"}}
+<p class="lead">Configura <code>/etc/issue</code>, el texto que la VM muestra en la consola antes de pedir el usuario. Los datos marcados los completa el sistema cada vez que se muestra la pantalla (por ejemplo, la hora siempre es la actual).</p>
+
+<section class="card">
+  <h2>Pantalla de entrada de {{.Cur.Label}} ({{.Cur.Host}})</h2>
+  <form method="post" action="/prep/issue" class="form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="t" value="{{.Cur.ID}}">
+    <label for="message">Mensaje personalizado</label>
+    <input id="message" name="message" value="{{index .Form "message"}}" placeholder="Bienvenido al laboratorio de Computación en la Nube" maxlength="200" autocomplete="off">
+    <small>Una sola línea, máximo 200 caracteres. Sin barra invertida (<code>\</code>): los datos del sistema se eligen con las casillas.</small>
+    <label class="check"><input type="checkbox" name="color" value="yes"{{if index .Form "color"}} checked{{end}}><span>Resaltar el mensaje (negrita y color)</span></label>
+
+    <fieldset class="checks">
+      <legend>Datos para mostrar</legend>
+      {{range .IssueFields}}
+      <label class="check"><input type="checkbox" name="{{.Name}}" value="yes"{{if index $.Form .Name}} checked{{end}}><span>{{.Label}} <code>{{.Esc}}</code></span></label>
+      {{end}}
+    </fieldset>
+
+    <div class="row">
+      <button type="submit" name="action" value="apply" class="primary">Aplicar en /etc/issue</button>
+      <button type="submit" name="action" value="state">Consultar estado actual</button>
+      <button type="submit" name="action" value="restore">Restaurar el original</button>
+    </div>
+  </form>
+  <p class="note">Se guardan copias en la VM: <code>/etc/issue.np2-prev</code> (versión anterior) y <code>/etc/issue.np2-orig</code> (la original, la primera vez). Para ver el cambio, mire la consola de la VM en VirtualBox: la pantalla de inicio de sesión se actualiza sola. Las sesiones SSH no muestran <code>/etc/issue</code>.</p>
+</section>
+
+{{template "opresult" .}}
+{{end}}

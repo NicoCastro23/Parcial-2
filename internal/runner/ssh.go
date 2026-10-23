@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 )
@@ -22,6 +23,9 @@ type SSH struct {
 	KnownHosts     string // archivo propio de la aplicación; vacío = el del usuario
 	Bin            string // por defecto "ssh"
 	ConnectTimeout int    // segundos; por defecto 8
+	// NoSudo ejecuta el script como el propio usuario aunque no sea root
+	// (sirve para comprobar el acceso de un usuario recién creado).
+	NoSudo bool
 }
 
 func (s *SSH) Transport() string { return "ssh" }
@@ -75,11 +79,18 @@ func remoteCommand(script string, sudo bool) string {
 }
 
 func (s *SSH) Run(ctx context.Context, script string) (Result, error) {
+	return s.RunInput(ctx, script, nil)
+}
+
+// RunInput ejecuta el script enviándole in por la entrada estándar. Sirve
+// para transferir archivos (un tar) por la misma conexión SSH.
+func (s *SSH) RunInput(ctx context.Context, script string, in io.Reader) (Result, error) {
 	bin := s.Bin
 	if bin == "" {
 		bin = "ssh"
 	}
-	cmd := exec.CommandContext(ctx, bin, s.args(remoteCommand(script, s.User != "root"))...)
+	cmd := exec.CommandContext(ctx, bin, s.args(remoteCommand(script, s.User != "root" && !s.NoSudo))...)
+	cmd.Stdin = in
 	res, err := execute(cmd)
 	res.Command = s.Describe()
 	res.Script = script

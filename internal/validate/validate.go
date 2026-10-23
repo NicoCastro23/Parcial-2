@@ -97,6 +97,20 @@ func Hostname(s string) error {
 	return nil
 }
 
+// Domain valida un dominio DNS (p. ej. "lab.local"): etiquetas RFC 1123
+// separadas por puntos, en minúsculas, máximo 200 caracteres.
+func Domain(s string) error {
+	if s == "" || len(s) > 200 {
+		return fmt.Errorf("dominio inválido %q: debe tener entre 1 y 200 caracteres", s)
+	}
+	for _, label := range strings.Split(s, ".") {
+		if !reLabel.MatchString(label) {
+			return fmt.Errorf("dominio inválido %q: use etiquetas en minúsculas, dígitos y guiones separadas por puntos (p. ej. lab.local)", s)
+		}
+	}
+	return nil
+}
+
 // Port convierte y valida un número de puerto TCP.
 func Port(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
@@ -166,4 +180,95 @@ func IssueText(s string) (string, error) {
 		}
 	}
 	return s, nil
+}
+
+// FullName valida el nombre completo (campo GECOS de /etc/passwd): opcional,
+// máximo 64 caracteres, sin caracteres de control ni los separadores de
+// /etc/passwd (":" y ",") ni barra invertida.
+func FullName(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if utf8.RuneCountInString(s) > 64 {
+		return "", errors.New("el nombre completo no puede superar los 64 caracteres")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || strings.ContainsRune(`:,=\`, r) {
+			return "", fmt.Errorf("el nombre completo no puede contener %q ni caracteres de control", r)
+		}
+	}
+	return s, nil
+}
+
+// Password valida una contraseña: 8 a 72 caracteres, sin caracteres de
+// control (chpasswd lee una línea por usuario).
+func Password(s string) error {
+	n := utf8.RuneCountInString(s)
+	if n < 8 || n > 72 {
+		return errors.New("la contraseña debe tener entre 8 y 72 caracteres")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return errors.New("la contraseña no puede contener caracteres de control")
+		}
+	}
+	return nil
+}
+
+var (
+	reServiceName = regexp.MustCompile(`^[a-z][a-z0-9\-]{1,27}$`)
+	reRelPath     = regexp.MustCompile(`^[A-Za-z0-9_.\-]+(/[A-Za-z0-9_.\-]+)*$`)
+	reArg         = regexp.MustCompile(`^[A-Za-z0-9_./:=,@+\-]+$`)
+	reEnvVar      = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}=[A-Za-z0-9_./:,@+\-]{0,200}$`)
+)
+
+// ServiceName valida el nombre de un servicio que despliega la aplicación
+// (se usa para la unidad, /opt/<nombre> y el usuario svc-<nombre>).
+func ServiceName(s string) error {
+	if !reServiceName.MatchString(s) {
+		return fmt.Errorf("nombre de servicio inválido %q: comience con letra; use minúsculas, dígitos y guiones (2 a 28 caracteres)", s)
+	}
+	return nil
+}
+
+// RelPath valida una ruta relativa sin "..", espacios ni caracteres
+// especiales (p. ej. el ejecutable dentro de la carpeta de la aplicación).
+func RelPath(s string) error {
+	if !reRelPath.MatchString(s) {
+		return fmt.Errorf("ruta inválida %q: use una ruta relativa con letras, dígitos, _ . - y /", s)
+	}
+	for _, part := range strings.Split(s, "/") {
+		if part == "." || part == ".." {
+			return fmt.Errorf("ruta inválida %q: no use . ni ..", s)
+		}
+	}
+	return nil
+}
+
+// ExecArgs valida los argumentos de ExecStart (separados por espacios). No
+// se admiten comillas, $, % ni otros caracteres que systemd o el shell
+// interpretarían.
+func ExecArgs(s string) ([]string, error) {
+	f := strings.Fields(s)
+	if len(f) > 20 {
+		return nil, errors.New("indique como máximo 20 argumentos")
+	}
+	for _, a := range f {
+		if len(a) > 200 || !reArg.MatchString(a) {
+			return nil, fmt.Errorf("argumento inválido %q: use letras, dígitos y _ . / : = , @ + -", a)
+		}
+	}
+	return f, nil
+}
+
+// EnvVars valida variables de entorno NOMBRE=valor separadas por espacios.
+func EnvVars(s string) ([]string, error) {
+	f := strings.Fields(s)
+	if len(f) > 20 {
+		return nil, errors.New("indique como máximo 20 variables")
+	}
+	for _, v := range f {
+		if !reEnvVar.MatchString(v) {
+			return nil, fmt.Errorf("variable inválida %q: use NOMBRE=valor (nombre en mayúsculas; valor con letras, dígitos y _ . / : , @ + -)", v)
+		}
+	}
+	return f, nil
 }

@@ -91,9 +91,14 @@ func TestPagesRender(t *testing.T) {
 	for path, want := range map[string]string{
 		"/connection":            "Conexión con las VMs",
 		"/prep/rootkey":          "Configurar llave de root",
+		"/prep/hostname":         "Aplicar nombre de host",
+		"/prep/packages":         "Instalar y eliminar aplicaciones",
+		"/prep/issue":            "Aplicar en /etc/issue",
 		"/journal":               "Registro de operaciones",
-		"/m/haproxy":             "Agregar un servidor al backend",
-		"/m/users-create":        "casilla de sudo",
+		"/haproxy":               "Agregar un servidor al backend",
+		"/services":              "Desplegar servicio",
+		"/users/create":          "Privilegios de sudo",
+		"/users/delete":          "Eliminar también todos sus archivos",
 		"/connection?t=balancer": "VM del balanceador",
 	} {
 		resp, body := get(t, ts, path)
@@ -101,8 +106,8 @@ func TestPagesRender(t *testing.T) {
 			t.Errorf("%s: status %d, no contiene %q", path, resp.StatusCode, want)
 		}
 	}
-	if resp, _ := get(t, ts, "/m/no-existe"); resp.StatusCode != 404 {
-		t.Errorf("módulo inexistente: %d", resp.StatusCode)
+	if resp, _ := get(t, ts, "/no-existe"); resp.StatusCode != 404 {
+		t.Errorf("página inexistente: %d", resp.StatusCode)
 	}
 }
 
@@ -197,5 +202,218 @@ func TestLockSet(t *testing.T) {
 	unlock()
 	if _, ok := l.try("a"); !ok {
 		t.Error("tras liberar debe poder bloquearse")
+	}
+}
+
+func TestHostnameForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Datos inválidos: se rechazan antes de tocar la VM y se conservan en el formulario.
+	_, body := post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"web1;reboot"}})
+	if !strings.Contains(body, "nombre de host inválido") || !strings.Contains(body, `value="web1;reboot"`) {
+		t.Errorf("debía rechazar el nombre inválido:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"web1"}, "domain": {"lab..local"}})
+	if !strings.Contains(body, "dominio inválido") {
+		t.Errorf("debía rechazar el dominio inválido:\n%s", body)
+	}
+	// Datos válidos: llega hasta el canal, que aquí falla porque la llave no existe.
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"apply"}, "name": {"Web1"}})
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("debía intentar conectar:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/hostname", url.Values{"t": {"test"}, "csrf": {srv.csrf}, "action": {"state"}})
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("consultar estado debía intentar conectar:\n%s", body)
+	}
+}
+
+func TestPackagesForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+	with := func(kv ...string) url.Values {
+		v := url.Values{}
+		for k, x := range base {
+			v[k] = x
+		}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body := post(t, ts, "/prep/packages", with("action", "install", "packages", "vim; reboot"))
+	if !strings.Contains(body, "nombre de paquete inválido") {
+		t.Errorf("debía rechazar la inyección:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/packages", with("action", "install", "packages", "  "))
+	if !strings.Contains(body, "indique al menos un paquete") {
+		t.Errorf("debía pedir un paquete:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/packages", with("action", "upgrade", "packages", "htop"))
+	if !strings.Contains(body, "Acción desconocida") {
+		t.Errorf("debía rechazar la acción:\n%s", body)
+	}
+	for _, action := range []string{"install", "remove", "state"} {
+		_, body = post(t, ts, "/prep/packages", with("action", action, "packages", "HTOP, tree", "purge", "yes"))
+		if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, `value="HTOP, tree"`) || !strings.Contains(body, "checked") {
+			t.Errorf("%s: debía intentar conectar y conservar el formulario:\n%s", action, body)
+		}
+	}
+}
+
+func TestIssueForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Por defecto vienen marcadas las casillas que pide el enunciado.
+	_, body := get(t, ts, "/prep/issue?t=test")
+	if strings.Count(body, "checked") != 5 {
+		t.Errorf("casillas marcadas por defecto: %d", strings.Count(body, "checked"))
+	}
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body = post(t, ts, "/prep/issue", form("action", "apply"))
+	if !strings.Contains(body, "escriba un mensaje o marque al menos un dato") {
+		t.Errorf("sin datos debe rechazar:\n%s", body)
+	}
+	_, body = post(t, ts, "/prep/issue", form("action", "apply", "message", `hola \e[2J`, "ip", "yes"))
+	if !strings.Contains(body, "no use la barra invertida") {
+		t.Errorf("debía rechazar la barra invertida:\n%s", body)
+	}
+	for _, action := range []string{"apply", "state", "restore"} {
+		_, body = post(t, ts, "/prep/issue", form("action", action, "message", "Hola", "ip", "yes"))
+		if !strings.Contains(body, "no se encuentra la llave privada") {
+			t.Errorf("%s: debía intentar conectar:\n%s", action, body)
+		}
+		// Solo queda marcada la casilla enviada.
+		if strings.Count(body, "checked") != 1 {
+			t.Errorf("%s: casillas marcadas %d, quería 1", action, strings.Count(body, "checked"))
+		}
+	}
+}
+
+func TestUserForms(t *testing.T) {
+	srv, ts := newTestServer(t)
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	// Crear: por defecto viene marcada la casilla de llaves y la contraseña deshabilitada.
+	_, body := get(t, ts, "/users/create?t=test")
+	if !strings.Contains(body, `id="keys" checked`) || !strings.Contains(body, `autocomplete="new-password" maxlength="72" disabled`) {
+		t.Errorf("valores por defecto de crear usuario:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "root", "keys", "yes"))
+	if !strings.Contains(body, "cuenta del sistema") {
+		t.Errorf("debía rechazar root:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "ana"))
+	if !strings.Contains(body, "indique una contraseña o marque") {
+		t.Errorf("debía pedir contraseña o llaves:\n%s", body)
+	}
+	// La contraseña nunca se devuelve en la página.
+	_, body = post(t, ts, "/users/create", form("action", "create", "name", "ana", "password", "MiClaveSecreta1"))
+	if strings.Contains(body, "MiClaveSecreta1") || !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("la contraseña no debe volver a la página y debía intentar conectar:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/create", form("action", "list"))
+	if !strings.Contains(body, "no se encuentra la llave privada") {
+		t.Errorf("listar debía intentar conectar")
+	}
+
+	// Eliminar: exige confirmación.
+	_, body = post(t, ts, "/users/delete", form("action", "delete", "name", "ana"))
+	if !strings.Contains(body, "Marque la casilla de confirmación") {
+		t.Errorf("debía exigir confirmación:\n%s", body)
+	}
+	_, body = post(t, ts, "/users/delete", form("action", "delete", "name", "ana", "confirm", "yes", "remove_files", "yes"))
+	if !strings.Contains(body, "no se encuentra la llave privada") || !strings.Contains(body, "checked") {
+		t.Errorf("debía intentar conectar y conservar la casilla:\n%s", body)
+	}
+}
+
+func TestServicesForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	_, body := get(t, ts, "/services?t=test")
+	for _, b := range []string{">start<", ">stop<", ">restart<", ">status<", ">enable<", ">disable<"} {
+		if !strings.Contains(body, b) {
+			t.Errorf("falta el botón %s", b)
+		}
+	}
+	app := filepath.Join(t.TempDir(), "fecha.sh")
+	os.WriteFile(app, []byte("#!/bin/bash\ndate\n"), 0o755)
+	cases := []struct {
+		form url.Values
+		want string
+	}{
+		{form("action", "deploy", "name", "Catalogo!", "source", app, "type", "simple"), "nombre de servicio inválido"},
+		{form("action", "deploy", "name", "fecha", "source", "fecha.sh", "type", "oneshot"), "ruta completa"},
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "args", "$(reboot)"), "argumento inválido"},
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "env", "a=b"), "variable inválida"},
+		{form("action", "status", "unit", "a;b"), "Indique la unidad"},
+		{form("action", "mask", "unit", "ssh"), "Acción desconocida"},
+		// Datos válidos: llega al canal (aquí falla porque la llave no existe).
+		{form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot", "start", "yes"), "no se encuentra la llave privada"},
+		{form("action", "restart", "unit", "fecha"), "no se encuentra la llave privada"},
+		{form("action", "list"), "no se encuentra la llave privada"},
+	}
+	for _, c := range cases {
+		_, body := post(t, ts, "/services", c.form)
+		if !strings.Contains(body, c.want) {
+			t.Errorf("%v: no contiene %q", c.form, c.want)
+		}
+	}
+	// Tras desplegar, la unidad queda lista en el formulario de gestión.
+	_, body = post(t, ts, "/services", form("action", "deploy", "name", "fecha", "source", app, "type", "oneshot"))
+	if !strings.Contains(body, `id="unit" name="unit" value="fecha"`) {
+		t.Errorf("el formulario de gestión debe quedar con la unidad desplegada")
+	}
+}
+
+func TestHAProxyForm(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// Sin VM elegida se propone la del balanceador.
+	_, body := get(t, ts, "/haproxy")
+	if !strings.Contains(body, `<option value="balancer" selected>`) {
+		t.Errorf("debía elegir la VM del balanceador")
+	}
+	form := func(kv ...string) url.Values {
+		v := url.Values{"t": {"test"}, "csrf": {srv.csrf}}
+		for i := 0; i < len(kv); i += 2 {
+			v.Set(kv[i], kv[i+1])
+		}
+		return v
+	}
+	for _, c := range []struct {
+		form url.Values
+		want string
+	}{
+		{form("action", "add", "name", "web 1", "addr", "192.168.1.70", "port", "8080"), "nombre de servidor inválido"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70;id", "port", "8080"), "dirección inválida"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "x"), "puerto del servidor"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080", "frontport", "70000"), "puerto del balanceador"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080", "balance", "random"), "algoritmo de balanceo desconocido"},
+		{form("action", "remove", "rname", "a;b"), "nombre de servidor inválido"},
+		{form("action", "add", "name", "web1", "addr", "192.168.1.70", "port", "8080"), "no se encuentra la llave privada"},
+		{form("action", "remove", "rname", "web1"), "no se encuentra la llave privada"},
+		{form("action", "test"), "no se encuentra la llave privada"},
+		{form("action", "state"), "no se encuentra la llave privada"},
+	} {
+		_, body := post(t, ts, "/haproxy", c.form)
+		if !strings.Contains(body, c.want) {
+			t.Errorf("%v: no contiene %q", c.form, c.want)
+		}
 	}
 }
