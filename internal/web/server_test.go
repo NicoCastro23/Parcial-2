@@ -417,3 +417,30 @@ func TestHAProxyForm(t *testing.T) {
 		}
 	}
 }
+
+func TestFindKeyAfterMovingFolder(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// La llave existe en data/keys pero config.json guarda la ruta vieja.
+	keys := filepath.Join(srv.dataDir, "keys")
+	os.MkdirAll(keys, 0o700)
+	os.WriteFile(filepath.Join(keys, "test_root_ed25519"), []byte("k"), 0o600)
+	got, err := srv.findKey("/Users/otro/carpeta-vieja/data/keys/test_root_ed25519")
+	if err != nil || got != filepath.Join(keys, "test_root_ed25519") {
+		t.Fatalf("debía encontrarla en data/keys: %q %v", got, err)
+	}
+	_, err = srv.findKey("/no/existe/otra_llave")
+	if err == nil || !strings.Contains(err.Error(), "cambie el canal a Guest Additions") {
+		t.Errorf("el error debe decir cómo resolverlo: %v", err)
+	}
+}
+
+func TestPortablePath(t *testing.T) {
+	srv, _ := newTestServer(t)
+	wd, _ := os.Getwd()
+	if got := srv.portablePath(filepath.Join(wd, "data", "keys", "k")); got != filepath.Join("data", "keys", "k") {
+		t.Errorf("dentro de la carpeta debe ser relativa: %q", got)
+	}
+	if got := srv.portablePath("/otra/parte/k"); got != "/otra/parte/k" {
+		t.Errorf("fuera de la carpeta debe quedar igual: %q", got)
+	}
+}

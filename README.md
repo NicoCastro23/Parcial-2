@@ -18,19 +18,16 @@ interactiva.
 | 3.3 | Servicios systemd | **Hecho** (pruebas unitarias; unidad validada con `systemd-analyze`; falta probar en la VM) |
 | 3.4 | HAProxy: agregar / quitar servidor del backend | **Hecho** (pruebas unitarias y de punta a punta con HAProxy real; falta probar en la VM) |
 
+> **Guía de pruebas paso a paso:** [PRUEBAS.md](PRUEBAS.md).
+
 ## Ejecutar
 
 Requisitos en el Mac: `ssh` y `ssh-keygen` (ya vienen con macOS) y VirtualBox
 (`VBoxManage`) solo si usas Guest Additions.
 
 ```bash
-# Opción A: binario ya compilado (Mac Intel)
-chmod +x dist/np2auto-darwin-amd64
-xattr -d com.apple.quarantine dist/np2auto-darwin-amd64   # si macOS lo bloquea
-./dist/np2auto-darwin-amd64            # la 1.ª vez crea config.json y termina
-
-# Opción B: compilar (necesita Go 1.24+)
-go build -o np2auto . && ./np2auto
+# Compilar (necesita Go 1.24+; dist/ no está en el repositorio)
+go build -o np2auto . && ./np2auto     # la 1.ª vez crea config.json y termina
 ```
 
 1. La primera ejecución crea `config.json` con valores de ejemplo y termina.

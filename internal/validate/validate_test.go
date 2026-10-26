@@ -101,12 +101,12 @@ func TestPort(t *testing.T) {
 }
 
 func TestAddress(t *testing.T) {
-	for _, ok := range []string{"192.168.1.65", "::1", "servidor1", "vm.example.com"} {
+	for _, ok := range []string{"192.168.1.65", "::1", "servidor1", "vm.example.com", "web1.lab.local", "1host.lab"} {
 		if err := Address(ok); err != nil {
 			t.Errorf("%q debería ser válido: %v", ok, err)
 		}
 	}
-	for _, bad := range append([]string{"a b", "-x", "a..b", "Host"}, injections...) {
+	for _, bad := range append([]string{"a b", "-x", "a..b", "Host", "999.1.1.1", "192.168.1.300", "10.0.0"}, injections...) {
 		if err := Address(bad); err == nil {
 			t.Errorf("%q debería ser inválido", bad)
 		}

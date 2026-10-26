@@ -132,7 +132,13 @@ func Address(s string) error {
 	if len(s) > 253 {
 		return errors.New("el nombre DNS es demasiado largo")
 	}
-	for _, label := range strings.Split(s, ".") {
+	// Un nombre DNS no puede terminar en una etiqueta solo numérica: algo
+	// como 999.1.1.1 o 192.168.1.300 es una IP mal escrita, no un nombre.
+	labels := strings.Split(s, ".")
+	if last := labels[len(labels)-1]; last != "" && strings.Trim(last, "0123456789") == "" {
+		return fmt.Errorf("dirección IP inválida %q: cada número debe estar entre 0 y 255", s)
+	}
+	for _, label := range labels {
 		if !reLabel.MatchString(label) {
 			return fmt.Errorf("dirección inválida %q: use una IP o un nombre DNS en minúsculas", s)
 		}
